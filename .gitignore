@@ -1,0 +1,14 @@
+# Java
+/target/
+/.mvn/
+
+# Node
+/frontend/web/node_modules/
+/frontend/web/dist/
+
+# OS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
