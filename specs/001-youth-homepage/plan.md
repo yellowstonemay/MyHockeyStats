@@ -1,132 +1,108 @@
-# Implementation Plan: Youth Homepage & Dashboard
+# Implementation Plan: [FEATURE]
 
-**Branch**: `001-youth-homepage` | **Date**: 2026-02-23 | **Spec**: (see `specs/001-youth-homepage/spec.md`)
-**Input**: Feature specification from `specs/001-youth-homepage/spec.md`
+**Branch**: `[###-feature-name]` | **Date**: [DATE] | **Spec**: [link]
+**Input**: Feature specification from `/specs/[###-feature-name]/spec.md`
+
+**Note**: This template is filled in by the `/speckit.plan` command. See `.specify/templates/plan-template.md` for the execution workflow.
 
 ## Summary
 
-Build a web application (React frontend + Spring Boot backend, PostgreSQL) targeted for deployment to Railway. Deliver an MVP exposing: public homepage with Youth Ice Hockey Lego graphic, signup/signin, and after auth four main tabs: `Profile`, `Season & Team Summary`, `Game History`, and `Dashboard`. Focus on secure auth, player profile management, season/team lookups (external adapters), game history browsing, server-side PDF export, and lightweight dashboard charts.
+[Extract from feature spec: primary requirement + technical approach from research]
 
 ## Technical Context
 
-**Language/Version**: Frontend: React 18 (TypeScript recommended). Backend: Java 17 (Spring Boot 3.x).
-**Primary Dependencies**: Frontend: React, React Router, React Query (or SWR), Charting (Recharts/Chart.js), Tailwind CSS or Chakra UI. Backend: Spring Boot, Spring Web, Spring Data JPA, Spring Security, Flyway (DB migrations), Jackson, Thymeleaf optional for server-side PDF templates, OpenPDF/Apache PDFBox or wkhtmltopdf integration for PDF rendering.
-**Build Tools**: Frontend: npm/Yarn + Vite. Backend: Maven or Gradle (Maven recommended for Railway compatibility).
-**Storage**: PostgreSQL (managed via Railway). Consider using Railway's provided DATABASE_URL; configure via Spring Boot `spring.datasource.url`.
-**Background Jobs**: Lightweight job queue implemented via database-backed `ExportJob` table + Spring @Scheduled worker, or integrate Redis/RabbitMQ if Railway plan allows and scale requires it.
-**Testing**: Frontend: Jest + React Testing Library. Backend: JUnit 5, Spring Boot Test, Testcontainers for Postgres during CI. Contract tests for HTTP APIs.
-**Target Platform**: Modern web browsers; backend deploys to Railway (container or Java deploy), database on Railway Postgres.
-**Project Type**: Monorepo with `frontend/web` and `backend/` directories.
-**Performance Goals**: API p95 < 200ms for read endpoints under small scale; PDF export for up to 50 games completes within 30s (or is queued and status reported).
-**Constraints**: Railway enforces build and startup semantics — prefer JVM options and shorter boot time; use environment variables for configuration. Use Test-First approach per constitution.
+**Language/Version**: Java 17 (backend), JavaScript/React 18 + Vite (frontend)
+**Primary Dependencies**: Spring Boot 3.1.4, Spring Data JPA, Spring Security, JJWT, OpenPDF; Vite, React, React Router
+**Storage**: PostgreSQL (managed: Railway for production; Docker Compose for local dev)
+**Testing**: JUnit + Testcontainers (backend), Jest + React Testing Library (frontend)
+**Target Platform**: Linux containers (Docker); deploy to Railway (managed Postgres + Docker / buildpacks)
+**Project Type**: Web application (frontend SPA + backend API)
+**Performance Goals**: initial target 100 RPS per backend instance; API p95 < 500ms for profile/season queries; background PDF export within 30s for moderate seasons
+**Constraints**: memory footprint per service targeted <512MB; prefer pure-Java PDF renderer to avoid native binaries on Railway; secure-by-default configuration (TLS required in prod)
+**Scale/Scope**: MVP supports 10k active players, with ability to scale horizontally via stateless backend and managed Postgres
 
 ## Constitution Check
 
-- Authentication & Authorization: Implement via `Spring Security` with secure password hashing (BCrypt) and JWT or secure session cookies. Parent linking and access must be auditable.
-- Test-First: Write failing tests before implementation (unit + integration using Testcontainers).
-- Data Privacy: Store only necessary PII (birthdate, location) and log external lookups without excess PII.
+*GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-Status: This plan follows the constitution. Any deviations must be documented in feature `Constitution Check`.
+[Gates determined based on `.specify/memory/constitution.md`]
+
+- Player-First: MUST provide usable increment (account creation + profile) — plan includes auth and profile first.
+- Secure Authentication & Access Control: MUST be implemented (JWT + Spring Security). Implementation present for signup/login; request filter pending.
+- Data Privacy & Minimization: Must collect minimal PII (name, birthdate, location). Plan restricts external lookups to name + birthyear.
+- Test-First: ALL new features MUST include tests. Current codebase has scaffolded tests missing for auth/profile — this is a violation that will be resolved in Phase 1 (tests added before merge).
+- Interoperability & Exportability: PDF export required; plan selects a Java-based renderer (OpenPDF) to comply with Railway constraints.
+- Observability & Logging: Plan mandates structured logging and correlation IDs; instrumentation tasks are included in Phase 1.
+
+**Violations / Notes**:
+- Test-First: currently not satisfied for implemented auth endpoints — justification: initial scaffold committed; immediate next PR will add unit/integration tests (gate must be closed before merging into main).
 
 ## Project Structure
 
+### Documentation (this feature)
+
+```text
+specs/[###-feature]/
+├── plan.md              # This file (/speckit.plan command output)
+├── research.md          # Phase 0 output (/speckit.plan command)
+├── data-model.md        # Phase 1 output (/speckit.plan command)
+├── quickstart.md        # Phase 1 output (/speckit.plan command)
+├── contracts/           # Phase 1 output (/speckit.plan command)
+└── tasks.md             # Phase 2 output (/speckit.tasks command - NOT created by /speckit.plan)
+```
+
+### Source Code (repository root)
+<!--
+  ACTION REQUIRED: Replace the placeholder tree below with the concrete layout
+  for this feature. Delete unused options and expand the chosen structure with
+  real paths (e.g., apps/admin, packages/something). The delivered plan must
+  not include Option labels.
+-->
+
+```text
+# [REMOVE IF UNUSED] Option 1: Single project (DEFAULT)
+src/
+├── models/
+├── services/
+├── cli/
+└── lib/
+
+tests/
+├── contract/
+├── integration/
+└── unit/
+
+# [REMOVE IF UNUSED] Option 2: Web application (when "frontend" + "backend" detected)
 backend/
-- src/main/java/ (Spring Boot app)
-  - com.myhockeystats.app
-    - Application.java
-    - api/ (controllers)
-    - service/
-    - model/ (JPA entities)
-    - repository/
-    - security/
-    - workers/
-  - src/main/resources/
-    - application.yml
-    - db/migration/ (Flyway)
-  - pom.xml
+├── src/
+│   ├── models/
+│   ├── services/
+│   └── api/
+└── tests/
 
 frontend/
-- web/
-  - src/
-    - pages/
-    - components/
-    - services/ (api clients)
-    - hooks/
-    - styles/
-  - package.json
-  - vite.config.ts
+├── src/
+│   ├── components/
+│   ├── pages/
+│   └── services/
+└── tests/
 
-docs/
-- quickstart.md
+# [REMOVE IF UNUSED] Option 3: Mobile + API (when "iOS/Android" detected)
+api/
+└── [same as backend above]
 
-Structure Decision: Monorepo keeps frontend and backend in one repository, simplifies CI and local docker-compose (Postgres). Build and deployment remain separate: frontend deployed as static assets or served by Railway static site; backend deployed as a Java service.
-
-## Implementation Phases & Tasks (high level)
-
-Phase 1 — Setup
-- Initialize `frontend/web` (Vite + React + TypeScript) and `backend` (Spring Boot with Maven). Add linting/formatting configs.
-- Add Dockerfiles and `docker-compose.yml` for local dev: Postgres + backend + frontend static server.
-- Add CI workflow: build backend (mvn test), build frontend (npm test), run integration tests using Testcontainers.
-
-Phase 2 — Foundational
-- Implement authentication with Spring Security, `User` entity, password hashing (BCrypt), and JWT/session handling.
-- Create JPA entities: `PlayerProfile`, `Season`, `Game`, `GameEvent`, `ExportJob` and Flyway migrations.
-- Implement service layer and repositories; add integration tests using Testcontainers Postgres.
-- Add background export worker: DB-backed job queue with a scheduled worker reading `ExportJob` rows and processing PDFs.
-- Add structured logging and correlation IDs.
-
-Phase 3 — MVP User Stories (P1 first)
-- US1: Signup/Signin endpoints + frontend pages. Tests (contract + integration).
-- US2: Player profile CRUD endpoints + frontend UI.
-- US4: Game history APIs and frontend listing/detail views.
-
-Phase 4 — Secondary Stories (P2)
-- US3: Season & Team Summary with external league adapter (HTTP client service) and an admin/manual-confirm flow for partial matches.
-- PDF Export: ExportJob flow, worker, status endpoints, and frontend polling.
-- Dashboard: Aggregation endpoints and frontend charts.
-
-Phase 5 — Polish & Deploy
-- Accessibility, responsive UI, security review, performance tuning.
-- Railway deployment: prepare `Dockerfile` for backend, set environment variables in Railway (e.g., `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD`, `JWT_SECRET`), and follow Railway build/deploy docs. For frontend, consider deploying static build via Railway static site or serve from backend.
-
-## Quickstart (developer)
-
-1. Start local services via Docker Compose:
-
-```powershell
-docker-compose up --build
+ios/ or android/
+└── [platform-specific structure: feature modules, UI flows, platform tests]
 ```
 
-2. Backend dev (Maven):
+**Structure Decision**: [Document the selected structure and reference the real
+directories captured above]
 
-```powershell
-cd backend
-mvn clean package
-mvn -DskipTests spring-boot:run
-```
+## Complexity Tracking
 
-3. Frontend dev:
+> **Fill ONLY if Constitution Check has violations that must be justified**
 
-```bash
-cd frontend/web
-npm install
-npm run dev
-```
-
-## Railway Deployment Notes
-
-- Railway provides a `DATABASE_URL` style connection string. For Spring Boot, set `SPRING_DATASOURCE_URL=jdbc:postgresql://<host>:<port>/<db>?sslmode=require` and `SPRING_DATASOURCE_USERNAME`/`SPRING_DATASOURCE_PASSWORD` appropriately, or parse `DATABASE_URL` during startup.
-- Configure `JAVA_TOOL_OPTIONS` or memory settings if Railway memory is constrained.
-- Use Railway environment variables for `JWT_SECRET`, external API keys, and any third-party credentials. Keep secrets out of repo.
-- For PDF generation requiring native binaries (wkhtmltopdf), prefer a Docker-based worker image including the binary and deploy it as a separate Railway service or container.
-
-## Tests & CI
-
-- Use Testcontainers for integration tests of repositories and Flyway migrations in CI.
-- CI pipeline must run `mvn test` and `npm test` and fail on test failures.
-
-## Next Steps / Clarifications
-
-- Confirm build tool: Maven (recommended) or Gradle? (default: Maven)
-- Confirm auth style: session cookies or JWTs? (recommend JWT for API-based SPA + Railway stateless services)
-- Confirm PDF renderer choice: server-side Java library (OpenPDF) vs. wkhtmltopdf binary (better HTML fidelity). Use wkhtmltopdf in Docker if fidelity required.
+| Violation | Why Needed | Simpler Alternative Rejected Because |
+|-----------|------------|-------------------------------------|
+| [e.g., 4th project] | [current need] | [why 3 projects insufficient] |
+| [e.g., Repository pattern] | [specific problem] | [why direct DB access insufficient] |
