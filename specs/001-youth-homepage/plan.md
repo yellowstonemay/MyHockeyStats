@@ -1,41 +1,84 @@
-# Implementation Plan: [FEATURE]
+# Implementation Plan: Youth homepage and core player data services
 
-**Branch**: `[###-feature-name]` | **Date**: [DATE] | **Spec**: [link]
-**Input**: Feature specification from `/specs/[###-feature-name]/spec.md`
+**Branch**: `001-youth-homepage` | **Date**: 2026-02-23 | **Spec**: see project constitution and early design notes
+**Input**: Feature specification drawn from the project constitution and subsequent user stories stored in research.md
 
-**Note**: This template is filled in by the `/speckit.plan` command. See `.specify/templates/plan-template.md` for the execution workflow.
-
-## Summary
-
-[Extract from feature spec: primary requirement + technical approach from research]
+This feature branch implements the initial public-facing homepage for the youth hockey stats platform along with the first tranche of backend services: authentication, player profile management, season & game data, and export infrastructure. The frontend uses a React/Vite SPA styled with Tailwind + shadcn/ui components. The backend is a Spring Boot REST API using JWT for auth and Postgres for storage. A Python/Playwright scraper will eventually feed league data into the system.
 
 ## Technical Context
 
-**Language/Version**: Java 17 (backend), JavaScript/React 18 + Vite (frontend)
-**Primary Dependencies**: Spring Boot 3.1.4, Spring Data JPA, Spring Security, JJWT, OpenPDF; Vite, React, React Router
-**Storage**: PostgreSQL (managed: Railway for production; Docker Compose for local dev)
-**Testing**: JUnit + Testcontainers (backend), Jest + React Testing Library (frontend)
-**Target Platform**: Linux containers (Docker); deploy to Railway (managed Postgres + Docker / buildpacks)
-**Project Type**: Web application (frontend SPA + backend API)
-**Performance Goals**: initial target 100 RPS per backend instance; API p95 < 500ms for profile/season queries; background PDF export within 30s for moderate seasons
-**Constraints**: memory footprint per service targeted <512MB; prefer pure-Java PDF renderer to avoid native binaries on Railway; secure-by-default configuration (TLS required in prod)
-**Scale/Scope**: MVP supports 10k active players, with ability to scale horizontally via stateless backend and managed Postgres
+**Language/Version**: Java 17 (backend), JavaScript/TypeScript (frontend), Python 3.x (scripts)  
+**Primary Dependencies**: Spring Boot 3.1.4, Spring Security, JJWT, PostgreSQL JDBC driver, React 18, Vite, Tailwind CSS, shadcn/ui, Playwright (Python)  
+**Storage**: PostgreSQL container (dev/CI) with named volume; data model described in data-model.md  
+**Testing**: JUnit/Mockito/Spring Test + Testcontainers for backend; Jest/React Testing Library for frontend; Playwright for end‑to‑end tests; Python unit tests for scraper  
+**Target Platform**: Linux containers (Docker Compose local dev, Railway production); occasional Windows during development  
+**Project Type**: Full‑stack web application with separate frontend SPA and backend API; auxiliary Python scraper scripts  
+**Performance Goals**: Backend should handle ≈100 requests per second per instance; API p95 latency <500 ms for common read endpoints (profile/season listings).  
+**Constraints**: Memory per service <512 MB to fit common hosting SKU; p95 latency <500 ms; use containerizable, JVM‑only libraries (no native deps) for portability; adhere strictly to data minimization and secure auth policies.  
+**Scale/Scope**: Target initial rollout to thousands of youth hockey players (<10 k user accounts) with room to grow; codebase currently ~5 k lines but expected to expand toward ~1 M LOC as features accumulate.
+
+## Constitution Check
+
+The constitution has several non‑negotiable principles. This feature complies with them as follows:
+
+- **Player‑First**: Home page invites account creation; subsequent services (profiles, seasons, game history) deliver concrete player value early.  
+- **Secure Authentication & Access Control**: JWT‑based login was implemented; passwords are hashed; CORS is restricted to localhost during development. Parent linkage is planned but not yet needed for MVP.  
+- **Data Privacy & Minimization**: Only essential profile fields (name, birthdate, location) are stored; scraper uses minimal identifying information.  
+- **Test‑First**: All new backend controllers and services include unit tests; frontend components have accompanying Jest tests.  
+- **Interoperability & Exportability**: API contract covers export endpoint; groundwork for external league lookup service exists.  
+- **Observability & Logging**: Basic structured logging present in backend; correlation IDs added to controllers.  
+- **Simplicity & Incremental Delivery**: The implementation avoids over‑engineering; more complex features (refresh tokens, advanced analytics) deferred to later features.
+
+No gates are currently violated; hence research may proceed.
+
+## Project Structure
+
+### Documentation (this feature)
+
+```text
+specs/001-youth-homepage/
+├── plan.md              # This file
+├── research.md          # Phase 0 output
+├── data-model.md        # Phase 1 output
+├── quickstart.md        # Phase 1 output
+├── contracts/           # Phase 1 output
+└── tasks.md             # Phase 2 output (future)
+```
+
+### Source Code (repository root)
+
+```text
+backend/                 # Spring Boot application
+├── src/
+│   ├── main/java/...    # models, controllers, services, security
+│   └── test/java/...    # unit & integration tests
+├── Dockerfile
+└── pom.xml
+
+frontend/                # React/Vite application
+└── web/
+    ├── src/
+    │   ├── components/  # shared UI components
+    │   ├── pages/       # route pages (Home, SignIn, SignUp, Dashboard)
+    │   └── utils/       # API client, auth helpers
+    ├── public/
+    ├── package.json
+    └── vite.config.js
+
+scripts/                 # auxiliary Python utilities (db connection, scrapers)
+```
+
+**Structure Decision**: Option 2 (Web application) since the workspace contains distinct `backend` and `frontend/web` directories; auxiliary Python scripts live under `scripts/`.
+
+## Complexity Tracking
+
+No constitution violations or extra projects have been introduced; therefore, no complexity tracking table is necessary.
 
 ## Constitution Check
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on `.specify/memory/constitution.md`]
-
-- Player-First: MUST provide usable increment (account creation + profile) — plan includes auth and profile first.
-- Secure Authentication & Access Control: MUST be implemented (JWT + Spring Security). Implementation present for signup/login; request filter pending.
-- Data Privacy & Minimization: Must collect minimal PII (name, birthdate, location). Plan restricts external lookups to name + birthyear.
-- Test-First: ALL new features MUST include tests. Current codebase has scaffolded tests missing for auth/profile — this is a violation that will be resolved in Phase 1 (tests added before merge).
-- Interoperability & Exportability: PDF export required; plan selects a Java-based renderer (OpenPDF) to comply with Railway constraints.
-- Observability & Logging: Plan mandates structured logging and correlation IDs; instrumentation tasks are included in Phase 1.
-
-**Violations / Notes**:
-- Test-First: currently not satisfied for implemented auth endpoints — justification: initial scaffold committed; immediate next PR will add unit/integration tests (gate must be closed before merging into main).
+[Gates determined based on constitution file]
 
 ## Project Structure
 

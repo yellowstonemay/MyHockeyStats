@@ -32,6 +32,10 @@
 - Performance Sizing: set conservative targets above.
 - PDF rendering choice: resolved to OpenPDF to avoid native binaries.
 
+## Decision: Data ingestion/scraping
+- Chosen: Python script using Playwright to crawl league websites (THF/AHF/AYHL) for player season/team data.
+- Rationale: league sites are dynamic and simple HTTP clients may struggle; Playwright provides headless browser automation to navigate JS pages reliably. Python keeps scraper separate from main JVM services and is easy to run manually or as a scheduled job.
+- Alternatives considered: direct HTTP/HTML parsing with requests+BeautifulSoup (rejected due to dynamic content), a Java-based crawler (possible but slower to develop).
 ## Alternatives & Rationale Summary
 - PDF: OpenPDF (chosen) vs wkhtmltopdf (rejected) vs headless Chromium (rejected)
 - Auth: JWT (chosen) vs server sessions (rejected for SPA simplicity)
