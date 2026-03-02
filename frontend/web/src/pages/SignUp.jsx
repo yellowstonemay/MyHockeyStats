@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
+import { useAuth } from '../lib/AuthContext'
 import { Button } from '../components/Button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/Card'
 import { Input } from '../components/Input'
@@ -8,9 +9,11 @@ import { Trophy } from 'lucide-react'
 
 export default function SignUp() {
   const navigate = useNavigate()
+  const { login } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
+  const [fullName, setFullName] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -18,7 +21,7 @@ export default function SignUp() {
     e.preventDefault()
     setError('')
 
-    if (!email || !password || !confirmPassword) {
+    if (!email || !password || !confirmPassword || !fullName) {
       setError('Please fill in all fields')
       return
     }
@@ -35,7 +38,8 @@ export default function SignUp() {
 
     setLoading(true)
     try {
-      await api.signup(email, password)
+      const response = await api.signup(email, password, fullName)
+      login(response.token, { email })
       navigate('/dashboard')
     } catch (err) {
       setError(err.message || 'Failed to create account')
@@ -61,6 +65,17 @@ export default function SignUp() {
                 {error}
               </div>
             )}
+
+            <div>
+              <label className="label">Full Name</label>
+              <Input
+                type="text"
+                placeholder="John Doe"
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                disabled={loading}
+              />
+            </div>
 
             <div>
               <label className="label">Email</label>

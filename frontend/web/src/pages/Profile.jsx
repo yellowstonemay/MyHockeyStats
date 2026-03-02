@@ -1,46 +1,53 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../lib/AuthContext'
 import { Button } from '../components/Button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/Card'
 import { Input } from '../components/Input'
-import { Trophy, ArrowLeft } from 'lucide-react'
+import { ArrowLeft } from 'lucide-react'
 
 export default function Profile() {
   const navigate = useNavigate()
-  const [fullName, setFullName] = useState('')
+  const { user } = useAuth()
+  const [fullName, setFullName] = useState(user?.fullName || '')
   const [birthdate, setBirthdate] = useState('')
   const [location, setLocation] = useState('')
   const [position, setPosition] = useState('')
   const [saved, setSaved] = useState(false)
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
 
   const handleSave = async (e) => {
     e.preventDefault()
-    // TODO: Call API to save profile
-    setSaved(true)
-    setTimeout(() => setSaved(false), 3000)
+    setError('')
+    setLoading(true)
+    
+    try {
+      // TODO: Once API is ready, send profile update
+      // const response = await api.updateProfile({ fullName, birthdate, location, position })
+      setSaved(true)
+      setTimeout(() => setSaved(false), 3000)
+    } catch (err) {
+      setError(err.message || 'Failed to save profile')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
     <div className="min-h-screen bg-slate-50">
-      {/* Navigation */}
-      <nav className="border-b border-slate-200 bg-white shadow-sm sticky top-0 z-50">
-        <div className="container flex items-center justify-between h-16">
-          <div className="flex items-center space-x-2">
-            <Trophy className="w-8 h-8 text-primary-600" />
-            <h1 className="text-2xl font-bold text-slate-900">MyHockeyStats</h1>
-          </div>
+      {/* Content */}
+      <div className="container py-12 max-w-2xl">
+        <div className="flex items-center mb-6">
           <button
             onClick={() => navigate('/dashboard')}
-            className="flex items-center space-x-2 text-slate-600 hover:text-slate-900"
+            className="flex items-center space-x-2 text-primary-600 hover:text-primary-700 transition-colors"
           >
             <ArrowLeft className="w-5 h-5" />
             <span>Back to Dashboard</span>
           </button>
         </div>
-      </nav>
 
-      {/* Content */}
-      <div className="container py-12 max-w-2xl">
         <Card>
           <CardHeader>
             <CardTitle>Edit Your Profile</CardTitle>
@@ -52,8 +59,25 @@ export default function Profile() {
                 ✓ Profile saved successfully
               </div>
             )}
+            
+            {error && (
+              <div className="p-3 bg-red-100 border border-red-400 text-red-700 rounded-md mb-6 text-sm">
+                {error}
+              </div>
+            )}
 
             <form onSubmit={handleSave} className="space-y-6">
+              <div>
+                <label className="label">Email</label>
+                <Input
+                  type="email"
+                  value={user?.email || ''}
+                  disabled
+                  className="bg-slate-100"
+                />
+                <p className="text-xs text-slate-500 mt-1">Email cannot be changed</p>
+              </div>
+
               <div>
                 <label className="label">Full Name</label>
                 <Input
@@ -61,6 +85,7 @@ export default function Profile() {
                   placeholder="Your full name"
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
+                  disabled={loading}
                 />
               </div>
 
@@ -70,6 +95,7 @@ export default function Profile() {
                   type="date"
                   value={birthdate}
                   onChange={(e) => setBirthdate(e.target.value)}
+                  disabled={loading}
                 />
               </div>
 
@@ -80,6 +106,7 @@ export default function Profile() {
                   placeholder="City, State"
                   value={location}
                   onChange={(e) => setLocation(e.target.value)}
+                  disabled={loading}
                 />
               </div>
 
@@ -88,6 +115,7 @@ export default function Profile() {
                 <select
                   value={position}
                   onChange={(e) => setPosition(e.target.value)}
+                  disabled={loading}
                   className="input appearance-none"
                 >
                   <option value="">Select a position</option>
@@ -98,14 +126,19 @@ export default function Profile() {
               </div>
 
               <div className="flex gap-4">
-                <Button type="submit" className="flex-1">
-                  Save Changes
+                <Button 
+                  type="submit" 
+                  className="flex-1"
+                  disabled={loading}
+                >
+                  {loading ? 'Saving...' : 'Save Changes'}
                 </Button>
                 <Button
                   type="button"
                   variant="outline"
                   className="flex-1"
                   onClick={() => navigate('/dashboard')}
+                  disabled={loading}
                 >
                   Cancel
                 </Button>

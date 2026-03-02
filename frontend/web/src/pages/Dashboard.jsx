@@ -1,44 +1,13 @@
 import React, { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { Button } from '../components/Button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/Card'
-import { api } from '../lib/utils'
-import { Trophy, BarChart3, Settings, LogOut } from 'lucide-react'
+import { BarChart3 } from 'lucide-react'
 
 export default function Dashboard() {
-  const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState('overview')
-
-  const handleLogout = () => {
-    api.logout()
-    navigate('/')
-  }
 
   return (
     <div className="min-h-screen bg-slate-50">
-      {/* Navigation */}
-      <nav className="border-b border-slate-200 bg-white shadow-sm sticky top-0 z-50">
-        <div className="container flex items-center justify-between h-16">
-          <div className="flex items-center space-x-2">
-            <Trophy className="w-8 h-8 text-primary-600" />
-            <h1 className="text-2xl font-bold text-slate-900">MyHockeyStats</h1>
-          </div>
-          <div className="flex items-center space-x-4">
-            <button 
-              onClick={() => navigate('/profile')}
-              className="flex items-center space-x-2 text-slate-600 hover:text-slate-900"
-            >
-              <Settings className="w-5 h-5" />
-              <span>Profile</span>
-            </button>
-            <Button variant="ghost" onClick={handleLogout}>
-              <LogOut className="w-4 h-4 mr-2" />
-              Sign Out
-            </Button>
-          </div>
-        </div>
-      </nav>
-
       {/* Sidebar & Content */}
       <div className="container py-8">
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">

@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
+import { useAuth } from '../lib/AuthContext'
 import { Button } from '../components/Button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/Card'
 import { Input } from '../components/Input'
@@ -8,6 +9,7 @@ import { Trophy } from 'lucide-react'
 
 export default function SignIn() {
   const navigate = useNavigate()
+  const { login } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -24,7 +26,8 @@ export default function SignIn() {
 
     setLoading(true)
     try {
-      await api.login(email, password)
+      const response = await api.login(email, password)
+      login(response.accessToken || response.token, { email })
       navigate('/dashboard')
     } catch (err) {
       setError(err.message || 'Failed to sign in')
