@@ -28,13 +28,17 @@ public class PlayerProfileController {
     record ProfileResponse(Long id, String fullName, LocalDate birthdate, String location, String position, String photoUrl) {}
 
     @PostMapping
-    public ResponseEntity<?> createProfile(@RequestBody CreateProfileRequest req, @RequestHeader("Authorization") String authHeader) {
+    public ResponseEntity<?> createProfile(@RequestBody CreateProfileRequest req, @RequestHeader(value = "Authorization", required = false) String authHeader) {
         try {
-            String token = authHeader.replace("Bearer ", "");
-            String email = jwtUtil.extractEmail(token);
+            // Extract user from token
+            String email = null;
+            if (authHeader != null && authHeader.startsWith("Bearer ")) {
+                String token = authHeader.replace("Bearer ", "");
+                email = jwtUtil.extractEmail(token);
+            }
             if (email == null) return ResponseEntity.status(401).body(Map.of("error", "Invalid token"));
 
-            // In a real app, fetch the User from UserService; for now, we assume the email correlates to a user
+            // In a real app, fetch the User from UserService
             PlayerProfile profile = playerProfileService.createProfile(null, req.fullName(), req.birthdate(), req.location());
             return ResponseEntity.status(HttpStatus.CREATED).body(Map.of("id", profile.getId()));
         } catch (Exception ex) {

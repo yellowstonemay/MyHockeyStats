@@ -39,14 +39,16 @@ public class SeasonController {
     @GetMapping("/{seasonId}/games")
     public ResponseEntity<?> getGamesBySeason(@PathVariable Long seasonId) {
         List<Game> games = gameService.getGamesBySeason(seasonId);
-        List<Map<String, Object>> response = games.stream()
-            .map(g -> Map.of(
-                "gameId", g.getId(),
-                "date", g.getDate(),
-                "opponent", g.getOpponent(),
-                "venue", g.getVenue() != null ? g.getVenue() : "",
-                "finalScore", g.getFinalScore() != null ? g.getFinalScore() : ""
-            ))
+        List<java.util.LinkedHashMap<String, Object>> response = games.stream()
+            .map(g -> {
+                java.util.LinkedHashMap<String, Object> map = new java.util.LinkedHashMap<>();
+                map.put("gameId", g.getId());
+                map.put("date", g.getDate());
+                map.put("opponent", g.getOpponent());
+                map.put("venue", g.getVenue() != null ? g.getVenue() : "");
+                map.put("finalScore", g.getFinalScore() != null ? g.getFinalScore() : "");
+                return map;
+            })
             .collect(Collectors.toList());
         return ResponseEntity.ok(response);
     }
