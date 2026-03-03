@@ -107,7 +107,7 @@ def create_games_and_stats(connection, profile_id, season_id, num_games=10):
             
             # Create game
             cur.execute(
-                "INSERT INTO games (season_id, date, opponent, final_score, created_at) VALUES (%s, %s, %s, %s, NOW()) RETURNING id",
+                "INSERT INTO games (season_id, date, opponent, final_score) VALUES (%s, %s, %s, %s) RETURNING id",
                 (season_id, game_date.date(), opponent, f"{3 + (i % 3)}-{2 + (i % 2)}")
             )
             game_id = cur.fetchone()[0]
@@ -117,7 +117,7 @@ def create_games_and_stats(connection, profile_id, season_id, num_games=10):
             assists = (i * 13) % 2  # 0 or 1 assists per game
             
             cur.execute(
-                "INSERT INTO game_performances (game_id, player_profile_id, goals, assists, notes, created_at) VALUES (%s, %s, %s, %s, %s, NOW())",
+                "INSERT INTO game_performances (game_id, player_profile_id, goals, assists, notes) VALUES (%s, %s, %s, %s, %s)",
                 (game_id, profile_id, goals, assists, f"Game {i+1} stats")
             )
             games_created += 1
