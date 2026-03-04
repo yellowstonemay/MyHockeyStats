@@ -18,9 +18,9 @@ PHASE 1: DISCOVERY (discover_teams.py)
   - Run once per season (or when you want to refresh the team list)
 
 PHASE 2: SCRAPING (scrape_rosters.py)
-  - Reads the teams CSV from Phase 1
+  - Reads a teams CSV file (e.g., from Phase 1)
   - For each team, scrapes the player roster
-  - Outputs: {season}-ayhl-rosters.csv (e.g., 2025-ayhl-rosters.csv)
+  - Outputs a corresponding roster CSV (e.g., 2025-ayhl-rosters.csv)
   - Can run multiple times without re-running Phase 1
 
 ================================================================================
@@ -40,18 +40,18 @@ USAGE WORKFLOW
 
 2. PHASE 2: Scrape rosters (can run multiple times)
    
-   python scrape_rosters.py --season 2025
+   python scrape_rosters.py 2025-ayhl-teams.csv
    
    This will:
-   - Read the team list from: 2025-ayhl-teams.csv
+   - Read the team list from the specified file (2025-ayhl-teams.csv)
    - For each team, navigate to the roster page and extract player data
-   - Save all player records to: 2025-ayhl-rosters.csv
+   - Save all player records to: 2025-ayhl-rosters.csv (inferred from the input file name)
 
 3. INSPECT & ITERATE
    
    You can edit 2025-ayhl-teams.csv to remove teams, then re-run Phase 2:
    
-   python scrape_rosters.py --season 2025
+   python scrape_rosters.py 2025-ayhl-teams.csv
 
 ================================================================================
 SAMPLE MODE (Testing/Debugging)
@@ -67,7 +67,7 @@ Test with a smaller dataset:
 
 2. Scrape rosters for those teams:
    
-   python scrape_rosters.py --season 2025
+   python scrape_rosters.py 2025-ayhl-teams.csv
    
    Output: 2025-ayhl-rosters.csv (with ~50-100 players instead of thousands)
 
@@ -82,9 +82,8 @@ discover_teams.py:
   --help                Show help message
 
 scrape_rosters.py:
-  --season YEAR         Season year (e.g., 2025 for 2025-2026 season) [REQUIRED]
-  --input FILE          Input CSV with discovered teams (default: {season}-ayhl-teams.csv)
-  --output FILE         Output CSV for rosters (default: {season}-ayhl-rosters.csv)
+  input_file            Input CSV file with discovered teams (e.g., "2025-ayhl-teams.csv") [REQUIRED]
+  --output FILE         Output CSV file for rosters (default: auto-generated from input file name)
   --delay SECONDS       Delay between requests in seconds (default: 0.02)
   --help                Show help message
 
@@ -99,10 +98,10 @@ OUTPUT FILES
     2025, 33, 279, "10U Major 15", "Long Island Royals", "?seasonid=33&leaguetypeid=2&leagueid=279&teamid=3302"
 
 2025-ayhl-rosters.csv (Phase 2 output)
-  Columns: season_year, seasonid, leagueid, teamid, team, number, player, pos, ht, wt, shot, birthdate, hometown, source_url
+  Columns: season_year, seasonid, leagueid, teamid, team, number, player, pos, ht, wt, shot, birthdate, hometown
   Example rows:
-    2025, 33, 279, 3301, "Long Island Gulls", "1", "John Doe", "C", "5'10\"", "165", "R", "2012-03-15", "New York, NY", "https://..."
-    2025, 33, 279, 3301, "Long Island Gulls", "2", "Jane Smith", "LW", "5'8\"", "158", "L", "2012-06-22", "Long Island, NY", "https://..."
+    2025, 33, 279, 3301, "Long Island Gulls", "1", "John Doe", "C", "5'10\"", "165", "R", "2012-03-15", "New York, NY"
+    2025, 33, 279, 3301, "Long Island Gulls", "2", "Jane Smith", "LW", "5'8\"", "158", "L", "2012-06-22", "Long Island, NY"
 
 ================================================================================
 SUPPORTED SEASONS
@@ -135,9 +134,6 @@ TIPS & NOTES
 
 • Phase 2 can be interrupted and resumed. It just processes teams from
   the input CSV sequentially.
-
-• The source_url column in the output CSV can be useful for debugging or
-  manually verifying player data.
 
 ================================================================================
 DEPRECATED

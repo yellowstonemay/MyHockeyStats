@@ -17,6 +17,8 @@ Usage:
 import argparse
 import csv
 import time
+import re
+import os
 from playwright.sync_api import sync_playwright
 
 
@@ -107,16 +109,30 @@ def scrape_roster_page(page, url):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Scrape rosters from Atlantic Hockey using discovered teams list")
-    parser.add_argument('--season', type=int, required=True, help='Season year (e.g. 2025 for 2025-2026)')
-    parser.add_argument('--input', help='Input CSV file with discovered teams (default: {season}-ayhl-teams.csv)')
-    parser.add_argument('--output', help='Output CSV file for rosters (default: {season}-ayhl-rosters.csv)')
+    parser = argparse.ArgumentParser(description="Scrape rosters from Atlantic Hockey using a discovered teams CSV file.")
+    parser.add_argument('input_file', help='Input CSV file with discovered teams (e.g., "2025-ayhl-teams.csv")')
+    parser.add_argument('--output', help='Output CSV file for rosters (default: auto-generated from input file name)')
     parser.add_argument('--delay', type=float, default=0.02, help='Delay between requests (seconds)')
     args = parser.parse_args()
 
-    # Set default files
-    input_file = args.input or f"{args.season}-ayhl-teams.csv"
-    output_file = args.output or f"{args.season}-ayhl-rosters.csv"
+    input_file = args.input_file
+
+    # Infer season from filename to provide helpful messages
+    season_year_from_filename = None
+    match = re.search(r'(\d{4})', os.path.basename(input_file))
+    if match:
+        season_year_from_filename = int(match.group(1))
+
+    # Determine output file
+    output_file = args.output
+    if not output_file:
+        # Generate from input: 2025-ayhl-teams.csv -> 2025-ayhl-rosters.csv
+        output_file = input_file.replace('teams.csv', 'rosters.csv')
+        # As a fallback, if 'teams.csv' isn't in the name
+        if output_file == input_file:
+            base, ext = os.path.splitext(input_file)
+            output_file = f"{base}-rosters.csv"
+
 
     # Read the discovered teams list
     print(f"\n{'='*70}")
@@ -132,7 +148,10 @@ def main():
             league_team_list = list(reader)
     except FileNotFoundError:
         print(f"❌ Error: File '{input_file}' not found.")
-        print(f"   Please run 'python discover_teams.py --season {args.season}' first")
+        if season_year_from_filename:
+            print(f"   Please run 'python discover_teams.py --season {season_year_from_filename}' first")
+        else:
+            print(f"   Please ensure the input file exists.")
         return
     
     if not league_team_list:
@@ -141,7 +160,7 @@ def main():
     
     print(f"✅ Loaded {len(league_team_list)} league-team pairs\n")
     
-    fieldnames = ['season_year', 'seasonid', 'leagueid', 'teamid', 'team', 'number', 'player', 'pos', 'ht', 'wt', 'shot', 'birthdate', 'hometown', 'source_url']
+    fieldnames = ['season_year', 'seasonid', 'leagueid', 'teamid', 'team', 'number', 'player', 'pos', 'ht', 'wt', 'shot', 'birthdate', 'hometown']
 
     print(f"Scraping rosters for {len(league_team_list)} teams...")
     print(f"Output: '{output_file}'\n")
@@ -197,7 +216,6 @@ def main():
                             'shot': pd.get('sh') or pd.get('shot') or '',
                             'birthdate': pd.get('bd') or pd.get('birthdate') or '',
                             'hometown': pd.get('hometown') or '',
-                            'source_url': url,
                         }
                         writer.writerow(row)
                         total_found += 1
