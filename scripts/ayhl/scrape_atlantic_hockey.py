@@ -1,17 +1,11 @@
 """
-Smart roster scraper for Atlantic Hockey (atlantichockey.org).
+DEPRECATED: This script has been split into two phases for better control:
+  - Phase 1: discover_teams.py  → outputs {season}-ayhl-teams.csv
+  - Phase 2: scrape_rosters.py → outputs {season}-ayhl-rosters.csv
 
-This script:
-1. Accepts a season year (e.g. `--season 2025` for 2025-2026 season)
-2. Maps it to site's seasonid
-3. Fetches the season page and parses the league dropdown (select[name="league"])
-4. Loops through discovered leagues to fetch actual team rosters
-5. Saves structured CSV with player data
+Please use discover_teams.py and scrape_rosters.py instead.
 
-Much faster than blind iteration - only scrapes leagues that exist in the season.
-
-Usage:
-  python scripts/scrape_atlantic_hockey.py --season 2025 --output rosters.csv
+This file is kept for backward compatibility but no longer maintained.
 """
 
 import argparse
