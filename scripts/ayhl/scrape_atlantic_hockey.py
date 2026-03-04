@@ -292,9 +292,10 @@ def discover_teams_from_league(page, league_params):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Smart scrape Atlantic Hockey rosters by discovering leagues and teams first")
+    parser = argparse.ArgumentParser(description="Smart scrape Atlantic Hockey rosters in two phases: discovery, then scraping")
     parser.add_argument('--season', type=int, required=True, help='Season year (e.g. 2025 for 2025-2026)')
-    parser.add_argument('--output', default='rosters.csv', help='Output CSV file')
+    parser.add_argument('--output', default='rosters.csv', help='Output CSV file for roster data')
+    parser.add_argument('--discovered-teams', default='discovered_teams.csv', help='CSV file to save discovered league-team list')
     parser.add_argument('--delay', type=float, default=0.02, help='Delay between requests (seconds)')
     parser.add_argument('--sample', action='store_true', help='Sample mode (limit to 2 leagues, 3 teams each)')
     args = parser.parse_args()
@@ -304,13 +305,17 @@ def main():
         print(f"Unknown season {args.season}. Please provide a supported season year.")
         return
 
-    fieldnames = ['season_year', 'seasonid', 'leagueid', 'teamid', 'team', 'number', 'player', 'pos', 'ht', 'wt', 'shot', 'birthdate', 'hometown', 'source_url']
-
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
 
-        # Step 1: Discover leagues
+        # =============================================================
+        # PHASE 1: DISCOVERY - Discover all leagues and teams
+        # =============================================================
+        print(f"\n{'='*70}")
+        print(f"PHASE 1: DISCOVERY")
+        print(f"{'='*70}\n")
+        
         print(f"Step 1: Discovering leagues for season {args.season} (seasonid={seasonid})...")
         leagues = discover_leagues_from_season(page, seasonid)
         
@@ -321,73 +326,110 @@ def main():
         
         if args.sample:
             leagues = leagues[:2]
-            print(f"Sample mode: limiting to first 2 leagues")
+            print(f"Sample mode: limiting to first 2 leagues\n")
         
-        # Step 2 & 3: Scrape each league and its teams
+        # Discover all teams and save to CSV
+        league_team_list = []
+        
+        for league in leagues:
+            print(f"  Discovering teams in '{league['name']}'...")
+            teams = discover_teams_from_league(page, league['params'])
+            print(f"    Found {len(teams)} teams")
+            
+            if args.sample:
+                teams = teams[:3]
+                print(f"    Sample mode: limiting to first 3 teams")
+            
+            for team in teams:
+                league_team_list.append({
+                    'season_year': args.season,
+                    'seasonid': seasonid,
+                    'leagueid': league['leagueid'],
+                    'league_name': league['name'],
+                    'team_name': team['name'],
+                    'team_params': team['params'],
+                })
+        
+        print(f"\n✅ Discovery complete: {len(league_team_list)} league-team pairs found")
+        
+        # Save discovered league-team list to CSV
+        print(f"\nSaving discovered teams to '{args.discovered_teams}'...")
+        with open(args.discovered_teams, 'w', newline='', encoding='utf-8') as csvfile:
+            fieldnames = ['season_year', 'seasonid', 'leagueid', 'league_name', 'team_name', 'team_params']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(league_team_list)
+        print(f"✅ Saved {len(league_team_list)} league-team pairs to '{args.discovered_teams}'")
+        
+        # =============================================================
+        # PHASE 2: SCRAPING - Scrape rosters for each discovered team
+        # =============================================================
+        print(f"\n{'='*70}")
+        print(f"PHASE 2: SCRAPING")
+        print(f"{'='*70}\n")
+        
+        fieldnames = ['season_year', 'seasonid', 'leagueid', 'teamid', 'team', 'number', 'player', 'pos', 'ht', 'wt', 'shot', 'birthdate', 'hometown', 'source_url']
+
+        print(f"Scraping rosters for {len(league_team_list)} teams...")
+        
         with open(args.output, 'w', newline='', encoding='utf-8') as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
 
             total_found = 0
-            for league in leagues:
-                print(f"\n--- League: {league['name']} (leagueid={league['leagueid']}) ---")
+            for idx, item in enumerate(league_team_list, 1):
+                league_name = item['league_name']
+                team_name = item['team_name']
+                team_params = item['team_params']
+                leagueid = item['leagueid']
                 
-                # Step 2: Discover teams in this league
-                print(f"  Discovering teams...")
-                teams = discover_teams_from_league(page, league['params'])
-                print(f"  Found {len(teams)} teams")
+                url = f"https://atlantichockey.org/teamroster.php{team_params}"
                 
-                if args.sample:
-                    teams = teams[:3]
-                    print(f"  Sample mode: limiting to first 3 teams")
+                try:
+                    res = scrape_roster_page(page, url)
+                except Exception as e:
+                    res = None
                 
-                # Step 4: Scrape roster for each team
-                for team in teams:
-                    url = f"https://atlantichockey.org/teamroster.php{team['params']}"
+                # Extract teamid from team params
+                teamid = None
+                if team_params.startswith('?'):
+                    params_str = team_params[1:]
+                    for param in params_str.split('&'):
+                        if param.startswith('teamid='):
+                            teamid = int(param.split('=')[1])
+                            break
+                
+                if res and res.get('players'):
+                    roster_team_name = res.get('team_name') or team_name or ''
                     
-                    try:
-                        res = scrape_roster_page(page, url)
-                    except Exception as e:
-                        res = None
+                    for pd in res['players']:
+                        row = {
+                            'season_year': item['season_year'],
+                            'seasonid': item['seasonid'],
+                            'leagueid': leagueid,
+                            'teamid': teamid or '',
+                            'team': roster_team_name,
+                            'number': pd.get('#') or pd.get('number') or '',
+                            'player': pd.get('player') or pd.get('player name') or pd.get('player_name') or '',
+                            'pos': pd.get('pos') or pd.get('position') or '',
+                            'ht': pd.get('ht') or '',
+                            'wt': pd.get('wt') or '',
+                            'shot': pd.get('sh') or pd.get('shot') or '',
+                            'birthdate': pd.get('bd') or pd.get('birthdate') or '',
+                            'hometown': pd.get('hometown') or '',
+                            'source_url': url,
+                        }
+                        writer.writerow(row)
+                        total_found += 1
                     
-                    if res and res.get('players'):
-                        team_name = res.get('team_name') or team['name'] or ''
-                        # Extract teamid from team params
-                        teamid = None
-                        if team['params'].startswith('?'):
-                            params_str = team['params'][1:]
-                            for param in params_str.split('&'):
-                                if param.startswith('teamid='):
-                                    teamid = int(param.split('=')[1])
-                                    break
-                        
-                        for pd in res['players']:
-                            row = {
-                                'season_year': args.season,
-                                'seasonid': seasonid,
-                                'leagueid': league['leagueid'],
-                                'teamid': teamid or '',
-                                'team': team_name,
-                                'number': pd.get('#') or pd.get('number') or '',
-                                'player': pd.get('player') or pd.get('player name') or pd.get('player_name') or '',
-                                'pos': pd.get('pos') or pd.get('position') or '',
-                                'ht': pd.get('ht') or '',
-                                'wt': pd.get('wt') or '',
-                                'shot': pd.get('sh') or pd.get('shot') or '',
-                                'birthdate': pd.get('bd') or pd.get('birthdate') or '',
-                                'hometown': pd.get('hometown') or '',
-                                'source_url': url,
-                            }
-                            writer.writerow(row)
-                            total_found += 1
-                        print(f"  ✅ {team['name']}: {len(res['players'])} players")
-                    else:
-                        print(f"  ⏭️  {team['name']}: no roster found")
-                    
-                    # Polite delay
-                    time.sleep(args.delay)
+                    print(f"  [{idx}/{len(league_team_list)}] ✅ {league_name} → {team_name}: {len(res['players'])} players")
+                else:
+                    print(f"  [{idx}/{len(league_team_list)}] ⏭️  {league_name} → {team_name}: no roster found")
+                
+                # Polite delay
+                time.sleep(args.delay)
 
-            print(f"\n✅ Done. Total player rows written: {total_found}")
+        print(f"\n✅ DONE. Total player rows written: {total_found} to '{args.output}'")
         browser.close()
 
 
