@@ -5,6 +5,7 @@
 # Node
 /frontend/web/node_modules/
 /frontend/web/dist/
+/scripts/thf-js/node_modules/
 
 # OS
 .DS_Store

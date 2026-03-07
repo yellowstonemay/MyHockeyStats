@@ -112,7 +112,7 @@ def main():
     parser = argparse.ArgumentParser(description="Scrape rosters from Atlantic Hockey using a discovered teams CSV file.")
     parser.add_argument('input_file', help='Input CSV file with discovered teams (e.g., "2025-ayhl-teams.csv")')
     parser.add_argument('--output', help='Output CSV file for rosters (default: auto-generated from input file name)')
-    parser.add_argument('--delay', type=float, default=0.02, help='Delay between requests (seconds)')
+    parser.add_argument('--delay', type=float, default=0.1, help='Delay between requests (seconds)')
     args = parser.parse_args()
 
     input_file = args.input_file
