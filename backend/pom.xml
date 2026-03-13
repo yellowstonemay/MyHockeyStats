@@ -16,6 +16,7 @@
   <properties>
     <java.version>21</java.version>
     <spring.boot.version>3.1.4</spring.boot.version>
+    <postgresql.version>42.7.4</postgresql.version>
   </properties>
 
   <dependencies>
