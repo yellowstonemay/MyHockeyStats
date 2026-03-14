@@ -1,10 +1,12 @@
 import React, { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Button } from '../components/Button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/Card'
 import { BarChart3 } from 'lucide-react'
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState('overview')
+  const navigate = useNavigate()
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -36,6 +38,13 @@ export default function Dashboard() {
                       <span>{item.label}</span>
                     </button>
                   ))}
+                  <button
+                    onClick={() => navigate('/integrated-history')}
+                    className="flex items-center space-x-3 px-4 py-3 border-t border-slate-200 text-left text-slate-600 hover:bg-slate-50 transition-colors"
+                  >
+                    <span>🔗</span>
+                    <span>Integrated History</span>
+                  </button>
                 </nav>
               </CardContent>
             </Card>

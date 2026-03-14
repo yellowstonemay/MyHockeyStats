@@ -7,10 +7,12 @@ import { Input } from '../components/Input'
 import { ArrowLeft } from 'lucide-react'
 
 export default function Profile() {
+  const BIRTH_MONTH_YEAR_REGEX = /^(0[1-9]|1[0-2])\/\d{4}$/
+
   const navigate = useNavigate()
   const { user } = useAuth()
   const [fullName, setFullName] = useState(user?.fullName || '')
-  const [birthdate, setBirthdate] = useState('')
+  const [birthMonthYear, setBirthMonthYear] = useState('')
   const [location, setLocation] = useState('')
   const [position, setPosition] = useState('')
   const [saved, setSaved] = useState(false)
@@ -23,8 +25,12 @@ export default function Profile() {
     setLoading(true)
     
     try {
+      if (!BIRTH_MONTH_YEAR_REGEX.test(birthMonthYear)) {
+        throw new Error('Birth month/year must be in MM/YYYY format (example: 05/2011)')
+      }
+
       // TODO: Once API is ready, send profile update
-      // const response = await api.updateProfile({ fullName, birthdate, location, position })
+      // const response = await api.updateProfile({ fullName, birthMonthYear, location, position })
       setSaved(true)
       setTimeout(() => setSaved(false), 3000)
     } catch (err) {
@@ -90,13 +96,15 @@ export default function Profile() {
               </div>
 
               <div>
-                <label className="label">Date of Birth</label>
+                <label className="label">Birth Month/Year</label>
                 <Input
-                  type="date"
-                  value={birthdate}
-                  onChange={(e) => setBirthdate(e.target.value)}
+                  type="text"
+                  placeholder="MM/YYYY (example: 05/2011)"
+                  value={birthMonthYear}
+                  onChange={(e) => setBirthMonthYear(e.target.value)}
                   disabled={loading}
                 />
+                <p className="text-xs text-slate-500 mt-1">Use month/year only. Day is not accepted.</p>
               </div>
 
               <div>

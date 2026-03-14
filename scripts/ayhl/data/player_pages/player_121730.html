@@ -1,0 +1,276 @@
+<!DOCTYPE html><html lang="en"><head>
+<title>Atlantic Youth Hockey League</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<link href="template.css" rel="stylesheet" type="text/css">
+
+<link rel="stylesheet" href="/css/w3c.css">
+
+<link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Lato">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Montserrat">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+<link rel="stylesheet" href="/css/new.css">
+
+
+<script src="https://code.jquery.com/jquery-3.7.1.min.js" type="text/javascript"></script> 
+<style>
+a {
+	color: blue;
+}
+</style>
+</head>
+
+
+  <body class="ayhl" id="playerPage" cz-shortcut-listen="true" style="">
+  <!-- Navbar -->
+<div class="w3-top">
+  <div class="w3-bar w3-white w3-left-align w3-large">
+    <a href="/" class="w3-bar-item w3-button w3-white" style="padding:0px;"><img src="https://blaster.atlantichockey.org/css/images/masthead/ayhl_logo_hires.png" height="50"></a>
+  </div>
+  <div class="w3-bar w3-black w3-left-align w3-large">
+      <a class="w3-bar-item w3-button w3-hide-medium w3-hide-large w3-right w3-padding-large w3-hover-white w3-large w3-black" href="javascript:void(0);" onclick="myFunction()" title="Toggle Navigation Menu"><i class="fa fa-bars"></i></a>
+	<div class="w3-dropdown-hover w3-hide-small">
+		<a href="/" class="w3-button w3-hide-small"><i class="fa fa-home"></i></a>
+	</div>
+	<div class="w3-dropdown-hover w3-hide-small">
+	  <button class="w3-button">About <i class="fa fa-caret-down"></i></button>
+	  <div class="w3-dropdown-content w3-bar-block w3-border">
+		<a href="about_ayhl.php" class="w3-bar-item w3-button">About the AYHL</a>
+		<a href="ayhl_personnel.php" class="w3-bar-item w3-button">Personnel</a>
+		<a href="ayhl_links.php" class="w3-bar-item w3-button">Links</a>
+		<a href="contact_ayhl.php" class="w3-bar-item w3-button">Contact Us</a>
+	  </div>
+	</div>
+	<div class="w3-dropdown-hover w3-hide-small">
+	  <button class="w3-button">Schedule/Results <i class="fa fa-caret-down"></i></button>
+	  <div class="w3-dropdown-content w3-bar-block w3-border">
+		<a href="full_schedule.php" class="w3-bar-item w3-button">Game Schedule</a>
+		<a href="scores.php?leaguetypeid=2&amp;leagueid=0" class="w3-bar-item w3-button">Latest Results</a>
+	  </div>
+	</div>
+	<div class="w3-dropdown-hover w3-hide-small">
+	  <button class="w3-button">Stats <i class="fa fa-caret-down"></i></button>
+	  <div class="w3-dropdown-content w3-bar-block w3-border">
+		<a href="league_standings.php" class="w3-bar-item w3-button">League Standings</a>
+		<a href="district_standings.php" class="w3-bar-item w3-button">District Standings</a>
+		<a href="top_scorers.php" class="w3-bar-item w3-button">Scoring Leaders</a>
+		<a href="top_goalies.php" class="w3-bar-item w3-button">Goaltending Leaders</a>
+	  </div>
+	</div>
+	<div class="w3-dropdown-hover w3-hide-small">
+	  <button class="w3-button">Teams <i class="fa fa-caret-down"></i></button>
+	  <div class="w3-dropdown-content w3-bar-block w3-border">
+		<a href="teamroster.php?leaguetypeid=2&amp;leagueid=0&amp;StatisticsTypeId=2" class="w3-bar-item w3-button">Rosters</a>
+		<a href="teamdetail.php?leaguetypeid=2" class="w3-bar-item w3-button">Team Directory</a>
+	  </div>
+	</div>
+	<div class="w3-dropdown-hover w3-hide-small">
+	  <button class="w3-button">Players <i class="fa fa-caret-down"></i></button>
+	  <div class="w3-dropdown-content w3-bar-block w3-border">
+		<a href="playerSearch.php" class="w3-bar-item w3-button">Player Search</a>
+		<a href="amhl_commitments.php" class="w3-bar-item w3-button">Player Advancement</a>
+	  </div>
+	</div>
+	<div class="w3-dropdown-hover w3-hide-small">
+	  <button class="w3-button">Events <i class="fa fa-caret-down"></i></button>
+	  <div class="w3-dropdown-content w3-bar-block w3-border">
+				<a href="ayhl_allstar.php" class="w3-bar-item w3-button">All-Star Game</a>		<a href="ayhl_playoffs.php" class="w3-bar-item w3-button">Playoffs</a>
+		<a href="ayhl_qualifier.php" class="w3-bar-item w3-button">AAHA Post Season</a>
+		<a href="ayhl_nationals.php" class="w3-bar-item w3-button">Nationals</a>
+		<a href="ayhl_tryouts.php" class="w3-bar-item w3-button">Tryouts</a>
+	  </div>
+	</div>
+    <a href="ayhl_officials.php" class="w3-button w3-hide-small">Officiating</a>
+	<a href="NewsArchive.php" class="w3-button w3-hide-small">News</a>
+    <a href="rink_search_engine.php?leaguetypeid=2" class="w3-button w3-hide-small">Arenas</a>
+  </div>
+
+  <!-- Navbar on small screens -->
+  <div id="navDemo" class="w3-bar-block w3-white w3-hide w3-hide-large w3-hide-medium w3-large">
+	<div class="w3-dropdown-hover w3-mobile">
+		<button class="w3-button">About <i class="fa fa-caret-down"></i></button>
+		<div class="w3-dropdown-content w3-bar-block w3-border">
+			<a href="about_ayhl.php" class="w3-bar-item w3-button">&nbsp;&nbsp;About the AYHL</a>
+			<a href="ayhl_personnel.php" class="w3-bar-item w3-button">&nbsp;&nbsp;Personnel</a>
+			<a href="ayhl_links.php" class="w3-bar-item w3-button">&nbsp;&nbsp;Links</a>
+			<a href="contact_ayhl.php" class="w3-bar-item w3-button">&nbsp;&nbsp;Contact Us</a>
+		</div>
+	</div>
+	<div class="w3-dropdown-hover w3-mobile">
+		<button class="w3-button">Schedule/Results <i class="fa fa-caret-down"></i></button>
+		<div class="w3-dropdown-content w3-bar-block w3-border">
+			<a href="full_schedule.php" class="w3-bar-item w3-button">&nbsp;&nbsp;Game Schedule</a>
+			<a href="scores.php?leaguetypeid=2&amp;leagueid=0" class="w3-bar-item w3-button">&nbsp;&nbsp;Latest Results</a>
+		</div>
+	</div>
+	<div class="w3-dropdown-hover w3-mobile">
+		<button class="w3-button">Stats <i class="fa fa-caret-down"></i></button>
+		<div class="w3-dropdown-content w3-bar-block w3-border">
+			<a href="league_standings.php" class="w3-bar-item w3-button">&nbsp;&nbsp;League Standings</a>
+			<a href="district_standings.php" class="w3-bar-item w3-button">&nbsp;&nbsp;District Standings</a>
+			<a href="top_scorers.php" class="w3-bar-item w3-button">&nbsp;&nbsp;Scoring Leaders</a>
+			<a href="top_goalies.php" class="w3-bar-item w3-button">&nbsp;&nbsp;Goaltending Leaders</a>
+		</div>
+	</div>
+	<div class="w3-dropdown-hover w3-mobile">
+		<button class="w3-button">Teams <i class="fa fa-caret-down"></i></button>
+		<div class="w3-dropdown-content w3-bar-block w3-border">
+			<a href="teamroster.php?leaguetypeid=2&amp;leagueid=0&amp;StatisticsTypeId=2" class="w3-bar-item w3-button">&nbsp;&nbsp;Rosters</a>
+			<a href="teamdetail.php?leaguetypeid=2" class="w3-bar-item w3-button">&nbsp;&nbsp;Team Directory</a>
+		</div>
+	</div>
+	<div class="w3-dropdown-hover w3-mobile">
+		<button class="w3-button">Players <i class="fa fa-caret-down"></i></button>
+		<div class="w3-dropdown-content w3-bar-block w3-border">
+			<a href="playerSearch.php" class="w3-bar-item w3-button">&nbsp;&nbsp;Player Search</a>
+			<a href="amhl_commitments.php" class="w3-bar-item w3-button">&nbsp;&nbsp;Player Advancement</a>
+		</div>
+	</div>
+	<div class="w3-dropdown-hover w3-mobile">
+		<button class="w3-button">Events <i class="fa fa-caret-down"></i></button>
+		<div class="w3-dropdown-content w3-bar-block w3-border">
+								<a href="ayhl_allstar.php" class="w3-bar-item w3-button">All-Star Game</a>			<a href="ayhl_playoffs.php" class="w3-bar-item w3-button">&nbsp;&nbsp;Playoffs</a>
+			<a href="ayhl_qualifier.php" class="w3-bar-item w3-button">&nbsp;&nbsp;AAHA Post Season</a>
+			<a href="ayhl_nationals.php" class="w3-bar-item w3-button">&nbsp;&nbsp;Nationals</a>
+			<a href="ayhl_tryouts.php" class="w3-bar-item w3-button">&nbsp;&nbsp;Tryouts</a>
+		</div>
+	</div>
+			<a href="ayhl_officials.php" class="w3-bar-item w3-button w3-padding-large">&nbsp;&nbsp;Officiating</a>
+			<a href="NewsArchive.php" class="w3-bar-item w3-button w3-padding-large">&nbsp;&nbsp;News</a>
+			<a href="rink_search_engine.php?leaguetypeid=" class="w3-bar-item w3-button w3-padding-large">&nbsp;&nbsp;Arenas</a>
+	</div>
+  </div>
+
+
+<!-- Masthead -->
+<!--<div class="w3-container w3-black w3-center w3-opacity" style="padding:48px 0px 6px 0px;">-->
+<div class="w3-container w3-center" style="padding:84px 0px 6px 0px;">
+  <div class="w3-content w3-hide-small">
+	<div id="header-logos"><div align="center"><a href="https://www.hattricksnahl.com/" target="_blank"><img src="images/teams/ayhl/HatTricks_40.png" border="0" alt="Danbury Hat Tricks" title="Danbury Hat Tricks"></a><a href="http://www.EliteHockeyProgram.com" target="_blank"><img src="images/teams/ayhl/Elite_Hockey_Academy_Logo_New.png" border="0" alt="Elite Hockey" title="Elite Hockey"></a><a href="http://www.phantomsyouth.org/" target="_blank"><img src="images/teams/ayhl/Lehigh_Valley.png" border="0" alt="Lehigh Valley Phantoms" title="Lehigh Valley Phantoms"></a><a href="http://www.ligulls.org" target="_blank"><img src="images/teams/ayhl/LI_Gulls.png" border="0" alt="Long Island Gulls" title="Long Island Gulls"></a><a href="http://www.liroyals.com" target="_blank"><img src="images/teams/ayhl/LI_Royals_New.png" border="0" alt="Long Island Royals" title="Long Island Royals"></a><a href="https://colonialshockey.org/" target="_blank"><img src="images/teams/ayhl/NJC_Logo_21.png" border="0" alt="New Jersey Colonials" title="New Jersey Colonials"></a><a href="http://www.devilsyouth.com" target="_blank"><img src="images/teams/ayhl/Devils Youth Hockey New 7.png" border="0" alt="New Jersey Devils Youth" title="New Jersey Devils Youth"></a><a href="https://www.titansnj.com/" target="_blank"><img src="images/teams/ayhl/Titans Junior New.png" border="0" alt="New Jersey Jr. Titans" title="New Jersey Jr. Titans"></a><a href="https://www.icehousenj.com/north-jersey-avalanche/" target="_blank"><img src="images/teams/ayhl/Avalanche_Logo_New2.png" border="0" alt="North Jersey Avalanche" title="North Jersey Avalanche"></a><a href="https://www.hollydellhockey.com/phc" target="_blank"><img src="images/teams/ayhl/PHC_Logo.png" border="0" alt="Philadelphia Hockey Club" title="Philadelphia Hockey Club"></a><a href="http://www.jrflyers.org" target="_blank"><img src="images/teams/ayhl/Jr_Flyers_New2.png" border="0" alt="Philadelphia Junior Flyers" title="Philadelphia Junior Flyers"></a><a href="http://www.littleflyers.org/" target="_blank"><img src="images/teams/team_littleflyers.png" border="0" alt="Philadelphia Little Flyers" title="Philadelphia Little Flyers"></a><a href="http://www.vfminutemen.com" target="_blank"><img src="images/teams/ayhl/Minutemen_New.png" border="0" alt="Valley Forge Minutemen" title="Valley Forge Minutemen"></a><a href="http://www.littlecaps.com" target="_blank"><img src="images/teams/ayhl/Little Caps.png" border="0" alt="Washington Little Capitals" title="Washington Little Capitals"></a><a href="https://wbsjrknights.com/" target="_blank"><img src="images/teams/ayhl/WBS_Jr.Knights_New.png" border="0" alt="WB/Scranton Jr. Knights" title="WB/Scranton Jr. Knights"></a></div></div>	</div>
+</div>
+
+<script>
+// Used to toggle the menu on small screens when clicking on the menu button
+function myFunction() {
+  var x = document.getElementById("navDemo");
+  if (x.className.indexOf("w3-show") == -1) {
+    x.className += " w3-show";
+  } else { 
+    x.className = x.className.replace(" w3-show", "");
+  }
+}
+</script><div class="w3-row-padding w3-padding-64 w3-container w3-gray">
+  <div class="w3-full">
+	<div class="w3-card-4 w3-white">
+	<header class="w3-container w3-black">
+		<div class="w3-threequarter">
+			<h1>AYHL Player Bio</h1>
+		</div>
+	</header>
+	
+<div class="w3-row" style="background-color:#e41a37;color:white;">
+	<div class="w3-twothird">
+		<div class="w3-quarter">
+			<img src="images/teams/ayhl/Devils Youth Hockey New 7.png" width="100" style="margin-left:20px;margin-top:10px;">
+		</div>
+		<div class="w3-threequarter">
+			<h1>#6  Ethan Yan</h1>
+			<h4>2025-2026 Season - New Jersey Devils Youth</h4>
+		</div>
+	</div>
+	<div class="w3-onethird" style="padding-top:12px;">
+		<script language="javascript">
+			function loadNewPlayer(form)
+			{
+				player = form.selectedIndex;
+				playerid = form.options[player].value;
+				window.location='playerpage.php?playerid=' + eval(playerid);
+			}
+		</script>
+
+		<strong>Birthday: </strong>05/2011<br>
+		<strong>Hometown: </strong>Basking Ridge NJ<br>
+		<strong>Position:</strong> 
+		Forward&nbsp;
+		<strong>Shoots: </strong>L<br>
+		<strong>Height: </strong>&nbsp;
+		<strong>Weight: </strong><br>
+
+		<div class="playerbio"><p></p></div>
+
+	</div>
+</div>
+
+
+	<h2 style="text-align: center; padding-top: 20px; margin-bottom: 0;">Career Statistics</h2><table>
+		                            
+			
+			<tbody><tr>
+				<td>
+								<table class="w3-table">
+				<tbody><tr class="w3-black">
+				<th>Season</th>
+				<th>League</th>
+				<th>Teams</th>
+				<th width="5%">Games</th>
+				<th width="5%">Goals</th>
+				<th width="5%">Assists</th>
+				<th width="5%">Points</th>
+				<th width="5%">Penalties</th>
+				<th width="5%">PIM</th>
+				</tr>
+				<tr class="table-row"><td style="padding:5px;"><a href="playerpage.php?playerid=121730&amp;seasonid=33">2025-2026 Season</a></td><td style="padding:5px;">14U Major 11</td><td style="padding:5px;"><a href="teamplayerstats.php?teamid=3325">New Jersey Devils Youth Elite</a></td><td style="padding:5px;">19</td><td style="padding:5px;">10</td><td style="padding:5px;">10</td><td style="padding:5px;">20</td><td style="padding:5px;">1</td><td style="padding:5px;">1</td></tr><tr class="table-row"><td style="padding:5px;"><a href="playerpage.php?playerid=121730&amp;seasonid=32">2024-2025 Season</a></td><td style="padding:5px;">13 Pure 11</td><td style="padding:5px;"><a href="teamplayerstats.php?teamid=3203">New Jersey Devils Youth </a></td><td style="padding:5px;">18</td><td style="padding:5px;">12</td><td style="padding:5px;">12</td><td style="padding:5px;">24</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td></tr><tr class="table-row"><td style="padding:5px;"><a href="playerpage.php?playerid=121730&amp;seasonid=31">2023-2024 Season</a></td><td style="padding:5px;">12U Major 11</td><td style="padding:5px;"><a href="teamplayerstats.php?teamid=3068">New Jersey Colonials Premier</a></td><td style="padding:5px;">27</td><td style="padding:5px;">2</td><td style="padding:5px;">4</td><td style="padding:5px;">6</td><td style="padding:5px;">2</td><td style="padding:5px;">2</td></tr><tr class="table-row"><td style="padding:5px;"><a href="playerpage.php?playerid=121730&amp;seasonid=30">2022-2023 Season</a></td><td style="padding:5px;">12U Minor 11</td><td style="padding:5px;"><a href="teamplayerstats.php?teamid=2939">New Jersey Colonials National</a></td><td style="padding:5px;">32</td><td style="padding:5px;">14</td><td style="padding:5px;">13</td><td style="padding:5px;">27</td><td style="padding:5px;">1</td><td style="padding:5px;">1</td></tr><tr class="table-row"><td style="padding:5px;"><a href="playerpage.php?playerid=121730&amp;seasonid=28">2021-2022 Season</a></td><td style="padding:5px;">10U Major 11</td><td style="padding:5px;"><a href="teamplayerstats.php?teamid=2794">New Jersey Colonials </a></td><td style="padding:5px;">28</td><td style="padding:5px;">12</td><td style="padding:5px;">12</td><td style="padding:5px;">24</td><td style="padding:5px;">2</td><td style="padding:5px;">2</td></tr><tr class="table-row"><td style="padding:5px;"><a href="playerpage.php?playerid=121730&amp;seasonid=27">2020-2021 Season</a></td><td style="padding:5px;">10U Minor 11</td><td style="padding:5px;"><a href="teamplayerstats.php?teamid=2643">New Jersey Colonials </a></td><td style="padding:5px;">20</td><td style="padding:5px;">8</td><td style="padding:5px;">8</td><td style="padding:5px;">16</td><td style="padding:5px;">1</td><td style="padding:5px;">2</td></tr>				</tbody></table>
+								</td></tr></tbody></table>
+				
+                      
+				<h2 style="padding: 30px 30px 0; margin: 0; text-align: center;">2025-2026 Season Statistics By Game</h2>
+                <table class="w3-table">
+				<tbody><tr><td>
+						<table width="100%">
+							<tbody><tr class="w3-black">
+								<th>Game ID
+								</th><th>Date
+								</th><th>Game Type
+								</th><th>League
+								</th><th>Team For
+								</th><th>Team Against
+								</th><th width="5%">G
+								</th><th width="5%">G(PP)
+								</th><th width="5%">G(SH)
+								</th><th width="5%">G(SO)
+								</th><th width="5%">A
+								</th><th width="5%">P
+								</th><th width="5%">PIM
+						
+							</th></tr>
+							<tr><td style="padding:5px;"><a href="game_recap.php?gameid=45178">45178</a></td><td style="padding:5px;">09/21/25</td><td style="padding:5px;">District and League Game</td><td style="padding:5px;">14U Major 11</td><td style="padding:5px;"><a href="teamplayerstats.php?teamid=3325">New Jersey Devils Youth Elite</a></td><td style="padding:5px;"><a href="teamplayerstats.php?teamid=">Philadelphia Little Flyers Elite</a></td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">1</td><td style="padding:5px;">1</td><td style="padding:5px;">0</td></tr><tr><td style="padding:5px;"><a href="game_recap.php?gameid=45627">45627</a></td><td style="padding:5px;">09/27/25</td><td style="padding:5px;">League Game</td><td style="padding:5px;">14U Major 11</td><td style="padding:5px;"><a href="teamplayerstats.php?teamid=3325">New Jersey Devils Youth Elite</a></td><td style="padding:5px;"><a href="teamplayerstats.php?teamid=">Long Island Gulls Elite</a></td><td style="padding:5px;">1</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">1</td><td style="padding:5px;">0</td></tr><tr><td style="padding:5px;"><a href="game_recap.php?gameid=45179">45179</a></td><td style="padding:5px;">09/28/25</td><td style="padding:5px;">League Game</td><td style="padding:5px;">14U Major 11</td><td style="padding:5px;"><a href="teamplayerstats.php?teamid=3325">New Jersey Devils Youth Elite</a></td><td style="padding:5px;"><a href="teamplayerstats.php?teamid=">Elite Hockey Elite</a></td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">1</td><td style="padding:5px;">1</td><td style="padding:5px;">0</td></tr><tr><td style="padding:5px;"><a href="game_recap.php?gameid=45397">45397</a></td><td style="padding:5px;">10/18/25</td><td style="padding:5px;">League Game</td><td style="padding:5px;">14U Major 11</td><td style="padding:5px;"><a href="teamplayerstats.php?teamid=3325">New Jersey Devils Youth Elite</a></td><td style="padding:5px;"><a href="teamplayerstats.php?teamid=">Elite Hockey Elite</a></td><td style="padding:5px;">2</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">1</td><td style="padding:5px;">3</td><td style="padding:5px;">0</td></tr><tr><td style="padding:5px;"><a href="game_recap.php?gameid=45383">45383</a></td><td style="padding:5px;">11/01/25</td><td style="padding:5px;">League Game</td><td style="padding:5px;">14U Major 11</td><td style="padding:5px;"><a href="teamplayerstats.php?teamid=3325">New Jersey Devils Youth Elite</a></td><td style="padding:5px;"><a href="teamplayerstats.php?teamid=">Washington Little Capitals Elite</a></td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td></tr><tr><td style="padding:5px;"><a href="game_recap.php?gameid=45384">45384</a></td><td style="padding:5px;">11/02/25</td><td style="padding:5px;">League Game</td><td style="padding:5px;">14U Major 11</td><td style="padding:5px;"><a href="teamplayerstats.php?teamid=3325">New Jersey Devils Youth Elite</a></td><td style="padding:5px;"><a href="teamplayerstats.php?teamid=">Washington Little Capitals Elite</a></td><td style="padding:5px;">1</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">1</td><td style="padding:5px;">2</td><td style="padding:5px;">0</td></tr><tr><td style="padding:5px;"><a href="game_recap.php?gameid=45180">45180</a></td><td style="padding:5px;">11/09/25</td><td style="padding:5px;">District and League Game</td><td style="padding:5px;">14U Major 11</td><td style="padding:5px;"><a href="teamplayerstats.php?teamid=3325">New Jersey Devils Youth Elite</a></td><td style="padding:5px;"><a href="teamplayerstats.php?teamid=">Philadelphia Little Flyers Elite</a></td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">1</td><td style="padding:5px;">1</td><td style="padding:5px;">0</td></tr><tr><td style="padding:5px;"><a href="game_recap.php?gameid=45181">45181</a></td><td style="padding:5px;">11/14/25</td><td style="padding:5px;">League Game</td><td style="padding:5px;">14U Major 11</td><td style="padding:5px;"><a href="teamplayerstats.php?teamid=3325">New Jersey Devils Youth Elite</a></td><td style="padding:5px;"><a href="teamplayerstats.php?teamid=">Long Island Gulls Elite</a></td><td style="padding:5px;">1</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">1</td><td style="padding:5px;">0</td></tr><tr><td style="padding:5px;"><a href="game_recap.php?gameid=45626">45626</a></td><td style="padding:5px;">11/22/25</td><td style="padding:5px;">League Game</td><td style="padding:5px;">14U Major 11</td><td style="padding:5px;"><a href="teamplayerstats.php?teamid=3325">New Jersey Devils Youth Elite</a></td><td style="padding:5px;"><a href="teamplayerstats.php?teamid=">Long Island Gulls Elite</a></td><td style="padding:5px;">1</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">2</td><td style="padding:5px;">3</td><td style="padding:5px;">0</td></tr><tr><td style="padding:5px;"><a href="game_recap.php?gameid=45182">45182</a></td><td style="padding:5px;">11/23/25</td><td style="padding:5px;">League Game</td><td style="padding:5px;">14U Major 11</td><td style="padding:5px;"><a href="teamplayerstats.php?teamid=3325">New Jersey Devils Youth Elite</a></td><td style="padding:5px;"><a href="teamplayerstats.php?teamid=">Elite Hockey Elite</a></td><td style="padding:5px;">1</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">1</td><td style="padding:5px;">2</td><td style="padding:5px;">0</td></tr><tr><td style="padding:5px;"><a href="game_recap.php?gameid=45183">45183</a></td><td style="padding:5px;">12/06/25</td><td style="padding:5px;">League Game</td><td style="padding:5px;">14U Major 11</td><td style="padding:5px;"><a href="teamplayerstats.php?teamid=3325">New Jersey Devils Youth Elite</a></td><td style="padding:5px;"><a href="teamplayerstats.php?teamid=">Washington Little Capitals Elite</a></td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td></tr><tr><td style="padding:5px;"><a href="game_recap.php?gameid=45184">45184</a></td><td style="padding:5px;">12/07/25</td><td style="padding:5px;">League Game</td><td style="padding:5px;">14U Major 11</td><td style="padding:5px;"><a href="teamplayerstats.php?teamid=3325">New Jersey Devils Youth Elite</a></td><td style="padding:5px;"><a href="teamplayerstats.php?teamid=">Washington Little Capitals Elite</a></td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">1</td><td style="padding:5px;">1</td><td style="padding:5px;">0</td></tr><tr><td style="padding:5px;"><a href="game_recap.php?gameid=44956">44956</a></td><td style="padding:5px;">12/13/25</td><td style="padding:5px;">District and League Game</td><td style="padding:5px;">14U Major 11</td><td style="padding:5px;"><a href="teamplayerstats.php?teamid=3325">New Jersey Devils Youth Elite</a></td><td style="padding:5px;"><a href="teamplayerstats.php?teamid=">Philadelphia Little Flyers Elite</a></td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">1</td><td style="padding:5px;">1</td><td style="padding:5px;">0</td></tr><tr><td style="padding:5px;"><a href="game_recap.php?gameid=45468">45468</a></td><td style="padding:5px;">12/20/25</td><td style="padding:5px;">League Game</td><td style="padding:5px;">14U Major 11</td><td style="padding:5px;"><a href="teamplayerstats.php?teamid=3325">New Jersey Devils Youth Elite</a></td><td style="padding:5px;"><a href="teamplayerstats.php?teamid=">Elite Hockey Elite</a></td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td></tr><tr><td style="padding:5px;"><a href="game_recap.php?gameid=45185">45185</a></td><td style="padding:5px;">12/21/25</td><td style="padding:5px;">League Game</td><td style="padding:5px;">14U Major 11</td><td style="padding:5px;"><a href="teamplayerstats.php?teamid=3325">New Jersey Devils Youth Elite</a></td><td style="padding:5px;"><a href="teamplayerstats.php?teamid=">Long Island Gulls Elite</a></td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td></tr><tr><td style="padding:5px;"><a href="game_recap.php?gameid=44961">44961</a></td><td style="padding:5px;">01/10/26</td><td style="padding:5px;">District and League Game</td><td style="padding:5px;">14U Major 11</td><td style="padding:5px;"><a href="teamplayerstats.php?teamid=3325">New Jersey Devils Youth Elite</a></td><td style="padding:5px;"><a href="teamplayerstats.php?teamid=">Philadelphia Little Flyers Elite</a></td><td style="padding:5px;">1</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">1</td><td style="padding:5px;">1</td></tr><tr><td style="padding:5px;"><a href="game_recap.php?gameid=45686">45686</a></td><td style="padding:5px;">02/21/26</td><td style="padding:5px;">Playoff Game</td><td style="padding:5px;">14U Major 11</td><td style="padding:5px;"><a href="teamplayerstats.php?teamid=3325">New Jersey Devils Youth Elite</a></td><td style="padding:5px;"><a href="teamplayerstats.php?teamid=">Washington Little Capitals Elite</a></td><td style="padding:5px;">1</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">1</td><td style="padding:5px;">0</td></tr><tr><td style="padding:5px;"><a href="game_recap.php?gameid=45687">45687</a></td><td style="padding:5px;">02/22/26</td><td style="padding:5px;">Playoff Game</td><td style="padding:5px;">14U Major 11</td><td style="padding:5px;"><a href="teamplayerstats.php?teamid=3325">New Jersey Devils Youth Elite</a></td><td style="padding:5px;"><a href="teamplayerstats.php?teamid=">Washington Little Capitals Elite</a></td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td></tr><tr><td style="padding:5px;"><a href="game_recap.php?gameid=45719">45719</a></td><td style="padding:5px;">02/28/26</td><td style="padding:5px;">Playoff Game</td><td style="padding:5px;">14U Major 11</td><td style="padding:5px;"><a href="teamplayerstats.php?teamid=3325">New Jersey Devils Youth Elite</a></td><td style="padding:5px;"><a href="teamplayerstats.php?teamid=">Washington Little Capitals Elite</a></td><td style="padding:5px;">1</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">0</td><td style="padding:5px;">1</td><td style="padding:5px;">0</td></tr>						</tbody></table>
+						</td></tr>
+						
+						</tbody></table>	</div>
+ </div>
+</div>
+<!-- Footer -->
+<footer class="w3-container w3-padding-64 w3-center w3-opacity">  
+  <div class="w3-xlarge w3-padding-32">
+	<a href="https://www.facebook.com/TheAYHL"><i class="fa-brands fa-facebook w3-hover-opacity"></i></a>
+	<a href="https://x.com/the_ayhl"><i class="fa-brands fa-x-twitter w3-hover-opacity"></i></a>
+	<a href="https://www.instagram.com/the_ayhl/"><i class="fa-brands fa-instagram w3-hover-opacity"></i></a>
+	<a href="https://www.tiktok.com/@the_ayhl"><i class="fa-brands fa-tiktok w3-hover-opacity"></i></a>
+	<a href="https://www.flickr.com/photos/the_ayhl"><i class="fa-brands fa-flickr w3-hover-opacity"></i></a>
+ </div>
+ ©Copyright 2026 Atlantic Metropolitan Hockey League, Inc.</footer>
+
+https://www.flickr.com/photos/the_ayhl/<!-- 20240603 :: MR :: DB Close added -->
+<script type="text/javascript">
+<!--
+var MenuBar1 = new Spry.Widget.MenuBar("MenuBar1");
+//-->
+</script>
+
+
+<script defer="" src="https://static.cloudflareinsights.com/beacon.min.js/v8c78df7c7c0f484497ecbca7046644da1771523124516" integrity="sha512-8DS7rgIrAmghBFwoOTujcf6D9rXvH8xm8JQ1Ja01h9QX8EzXldiszufYa4IFfKdLUKTTrnSFXLDkUEOTrZQ8Qg==" data-cf-beacon="{&quot;version&quot;:&quot;2024.11.0&quot;,&quot;token&quot;:&quot;6bd0f49bd2ec4507978db80eceea1234&quot;,&quot;r&quot;:1,&quot;server_timing&quot;:{&quot;name&quot;:{&quot;cfCacheStatus&quot;:true,&quot;cfEdge&quot;:true,&quot;cfExtPri&quot;:true,&quot;cfL4&quot;:true,&quot;cfOrigin&quot;:true,&quot;cfSpeedBrain&quot;:true},&quot;location_startswith&quot;:null}}" crossorigin="anonymous"></script>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'9dc06b4f0efb269c',t:'MTc3MzQ2MTMyNw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><iframe height="1" width="1" style="position: absolute; top: 0px; left: 0px; border: none; visibility: hidden;"></iframe>
+
+
+</body></html>

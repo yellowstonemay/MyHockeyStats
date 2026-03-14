@@ -55,6 +55,29 @@ python scripts/connect_db.py
 
 This will verify that your database is accessible and running.
 
+### Method 4: Load Real AYHL Roster Data
+
+To load all `*-ayhl-rosters.csv` files from `scripts/ayhl/data/` into the integration import tables:
+
+```bash
+pip install psycopg2-binary
+python scripts/ayhl/load_rosters_to_db.py
+```
+
+Dry run without writing to the database:
+
+```bash
+python scripts/ayhl/load_rosters_to_db.py --dry-run
+```
+
+What this loader does:
+
+- Creates the integration tables from the backend migration if they do not exist
+- Scans every `yyyy-ayhl-rosters.csv` file in `scripts/ayhl/data/`
+- Loads each roster player into `integration_imported_player_record`
+- Records the run in `integration_import_run`
+- Skips duplicates safely using the source hash constraint
+
 ## Database Requirements
 
 Before running either script, ensure:
@@ -105,21 +128,65 @@ psql -h localhost -U postgres -d myhockeystats -c \
    WHERE pp.full_name = 'Ethan Yan' ORDER BY g.date"
 ```
 
+## Run the Application
+
+### Option 1: Run Locally (Backend + Frontend, DB in Docker)
+
+1. **Start PostgreSQL**:
+   ```bash
+   docker compose up -d db
+   ```
+2. **Start backend** (from `backend/`):
+   ```bash
+   mvn spring-boot:run
+   ```
+3. **Start frontend** (from `frontend/web/`):
+   ```bash
+   npm install
+   npm run dev
+   ```
+4. **Open the app**:
+   - Frontend: `http://localhost:5173`
+   - Backend health: `http://localhost:8080/health`
+
+### Option 2: Run Fully in Docker
+
+1. **Build and start all services** from repo root:
+   ```bash
+   docker compose up --build -d
+   ```
+2. **Open the app**:
+   - Frontend: `http://localhost`
+   - Backend API: `http://localhost:8080`
+   - Backend health: `http://localhost:8080/health`
+
+### If You Do Not See Latest Code Changes in Docker
+
+Rebuild containers and restart:
+
+```bash
+docker compose down
+docker compose up --build -d
+```
+
+If changes still do not appear, force a no-cache rebuild:
+
+```bash
+docker compose build --no-cache
+docker compose up -d
+```
+
 ## Testing the Full Flow
 
 1. **Seed the data** using one of the methods above
-2. **Start the backend**:
-   ```bash
-   docker compose up -d
-   ```
-3. **Start the frontend** (in `frontend/web/`):
-   ```bash
-   npm run dev
-   ```
-4. **Log in** at http://localhost with:
+2. **Start the app** using either "Run Locally" or "Run Fully in Docker"
+3. **Log in** with:
    - Email: ethan.yan@example.com
    - Password: TestPassword123
-5. **Verify data** appears in Dashboard → Seasons and Game History
+4. **Open Integrated History**:
+   - `http://localhost:5173/integrated-history` (local dev)
+   - `http://localhost/integrated-history` (Docker)
+5. **Verify data** appears in Dashboard, Seasons, Game History, and Integrated History
 
 ## Notes
 

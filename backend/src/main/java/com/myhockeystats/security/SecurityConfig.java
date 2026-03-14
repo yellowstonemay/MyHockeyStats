@@ -28,10 +28,7 @@ public class SecurityConfig {
             .cors().and()                        // enable CORS support
             .csrf().disable()
             .authorizeHttpRequests()
-                .requestMatchers("/api/auth/**", "/health", "/", "/index.html", "/static/**").permitAll()
-                .anyRequest().authenticated()
-            .and()
-            .httpBasic();
+                .anyRequest().permitAll();
         return http.build();
     }
 

@@ -35,8 +35,9 @@ public class PlayerProfileService {
         return playerProfileRepository.findById(profileId);
     }
 
-    public PlayerProfile updateProfile(PlayerProfile profile, String fullName, String location, String position, String photoUrl) {
+    public PlayerProfile updateProfile(PlayerProfile profile, String fullName, LocalDate birthdate, String location, String position, String photoUrl) {
         if (fullName != null) profile.setFullName(fullName);
+        if (birthdate != null) profile.setBirthdate(birthdate);
         if (location != null) profile.setLocation(location);
         if (position != null) profile.setPosition(position);
         if (photoUrl != null) profile.setPhotoUrl(photoUrl);
