@@ -15,11 +15,11 @@ Note: Playwright must be installed and `python -m playwright install chromium` r
 """
 import csv
 import glob
+import json
 import os
 import sys
 import time
 import re
-from datetime import datetime
 from playwright.sync_api import sync_playwright
 
 THIS_DIR = os.path.dirname(__file__)
@@ -27,6 +27,21 @@ DATA_DIR = os.path.join(THIS_DIR, 'data')
 PAGES_DIR = os.path.join(DATA_DIR, 'player_pages')
 if not os.path.exists(PAGES_DIR):
     os.makedirs(PAGES_DIR, exist_ok=True)
+
+
+def is_transient_navigation_error(message):
+    m = (message or '').upper()
+    transient_markers = [
+        'ERR_NAME_NOT_RESOLVED',
+        'ERR_INTERNET_DISCONNECTED',
+        'ERR_CONNECTION_RESET',
+        'ERR_CONNECTION_CLOSED',
+        'ERR_CONNECTION_ABORTED',
+        'ERR_NETWORK_CHANGED',
+        'TIMED OUT',
+        'TIMEOUT',
+    ]
+    return any(marker in m for marker in transient_markers)
 
 
 def read_playerids_from_csv(path):
@@ -52,6 +67,10 @@ def read_playerids_from_plain(path):
 
 
 def find_latest_playerid_file():
+    # Prefer the stable filename if present
+    stable = os.path.join(DATA_DIR, 'ayhl-player-id.csv')
+    if os.path.exists(stable):
+        return stable
     files = sorted(glob.glob(os.path.join(DATA_DIR, 'ayhl-player-id-*.csv')))
     return files[-1] if files else None
 
@@ -84,6 +103,108 @@ def parse_and_save_tables(html, out_prefix):
     return saved
 
 
+def load_completed_ids_from_career_csv(career_csv_path):
+    """Infer completed player ids from the aggregated career CSV."""
+    completed = set()
+    if not os.path.exists(career_csv_path):
+        return completed
+
+    try:
+        with open(career_csv_path, 'r', encoding='utf-8', newline='') as fh:
+            reader = csv.DictReader(fh)
+            if not reader.fieldnames or 'playerid' not in reader.fieldnames:
+                return completed
+            for row in reader:
+                pid = (row.get('playerid') or '').strip()
+                if pid:
+                    completed.add(pid)
+    except Exception:
+        return set()
+
+    return completed
+
+
+def load_career_json(career_json_path):
+    if not os.path.exists(career_json_path):
+        return {}
+    try:
+        with open(career_json_path, 'r', encoding='utf-8') as fh:
+            payload = json.load(fh)
+            if isinstance(payload, dict):
+                return payload
+    except Exception:
+        return {}
+    return {}
+
+
+def normalize_progress(raw_progress, ordered_input_ids):
+    """Return simple checkpoint format:
+
+    {
+      "current_player_id": <str|null>,
+      "completed_player_ids": [..],
+            "empty_carrer_ids": [..],
+            "need_retry_ids": [..]
+    }
+
+    Supports migration from older per-player status format.
+    """
+    ordered_set = set(ordered_input_ids)
+
+    default = {
+        'current_player_id': None,
+        'completed_player_ids': [],
+        'empty_carrer_ids': [],
+        'need_retry_ids': [],
+    }
+
+    if not isinstance(raw_progress, dict):
+        return default
+
+    # New format
+    if 'completed_player_ids' in raw_progress or 'empty_carrer_ids' in raw_progress or 'failed_player_ids' in raw_progress or 'need_retry_ids' in raw_progress:
+        completed = [pid for pid in raw_progress.get('completed_player_ids', []) if pid in ordered_set]
+        # Backward-compatible read from old key 'failed_player_ids'
+        empty_carrer = [pid for pid in raw_progress.get('empty_carrer_ids', raw_progress.get('failed_player_ids', [])) if pid in ordered_set]
+        need_retry = [pid for pid in raw_progress.get('need_retry_ids', []) if pid in ordered_set]
+        current = raw_progress.get('current_player_id')
+        if current not in ordered_set:
+            current = None
+        return {
+            'current_player_id': current,
+            'completed_player_ids': completed,
+            'empty_carrer_ids': empty_carrer,
+            'need_retry_ids': need_retry,
+        }
+
+    # Old format migration: {"<pid>": {"status": "success|failed|in_progress"...}}
+    completed_set = set()
+    empty_carrer_set = set()
+    current = None
+    for pid, meta in raw_progress.items():
+        if pid not in ordered_set or not isinstance(meta, dict):
+            continue
+        status = meta.get('status')
+        if status == 'success':
+            completed_set.add(pid)
+        elif status == 'failed':
+            empty_carrer_set.add(pid)
+        elif status == 'in_progress' and current is None:
+            current = pid
+
+    completed = [pid for pid in ordered_input_ids if pid in completed_set]
+    empty_carrer = [pid for pid in ordered_input_ids if pid in empty_carrer_set]
+    if current in completed_set or current in empty_carrer_set:
+        current = None
+
+    return {
+        'current_player_id': current,
+        'completed_player_ids': completed,
+        'empty_carrer_ids': empty_carrer,
+        'need_retry_ids': [],
+    }
+
+
 def main():
     arg = sys.argv[1] if len(sys.argv) > 1 else None
     if arg:
@@ -105,24 +226,95 @@ def main():
 
     print(f'Processing {len(playerids)} playerids...')
 
-    # aggregated output file
-    ts = datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')
-    out_all = os.path.join(DATA_DIR, f'ayhl-player-career-{ts}.csv')
-    # remove if exists from previous failed run
-    if os.path.exists(out_all):
-        os.remove(out_all)
-    header_written = False
+    # aggregated output file (stable json keyed by playerid)
+    out_all = os.path.join(DATA_DIR, 'ayhl-player-career.json')
+    # legacy csv path kept only for backward-compatible completed-id inference
+    legacy_csv = os.path.join(DATA_DIR, 'ayhl-player-career.csv')
+    # progress file to track per-player status so runs can be resumed
+    progress_file = os.path.join(DATA_DIR, 'ayhl-player-career-progress.json')
+    # create data dir if missing
+    if not os.path.exists(DATA_DIR):
+        os.makedirs(DATA_DIR, exist_ok=True)
+
+    # load and normalize progress to simple player-id checkpoint model
+    raw_progress = {}
+    if os.path.exists(progress_file):
+        try:
+            with open(progress_file, 'r', encoding='utf-8') as pf:
+                raw_progress = json.load(pf)
+        except Exception:
+            raw_progress = {}
+
+    ordered_input_ids = [entry['playerid'] for entry in playerids]
+    name_by_pid = {entry['playerid']: entry.get('player_name', '') for entry in playerids}
+    progress = normalize_progress(raw_progress, ordered_input_ids)
+
+    completed_set = set(progress.get('completed_player_ids', []))
+    empty_carrer_set = set(progress.get('empty_carrer_ids', []))
+    need_retry_set = set(progress.get('need_retry_ids', []))
+
+    # Load existing JSON output and infer completed ids from it.
+    career_by_player = load_career_json(out_all)
+    completed_set |= set(career_by_player.keys())
+    # Backward-compatible inference from legacy CSV if it exists.
+    completed_set |= load_completed_ids_from_career_csv(legacy_csv)
+
+    def save_career_json():
+        try:
+            with open(out_all, 'w', encoding='utf-8') as jf:
+                json.dump(career_by_player, jf, indent=2, ensure_ascii=False)
+        except Exception:
+            pass
+
+    # Save helper for simplified progress format
+    def save_progress(current_player_id=None):
+        payload = {
+            'current_player_id': current_player_id,
+            'completed_player_ids': [pid for pid in ordered_input_ids if pid in completed_set],
+            'empty_carrer_ids': [pid for pid in ordered_input_ids if pid in empty_carrer_set],
+            'need_retry_ids': [pid for pid in ordered_input_ids if pid in need_retry_set],
+        }
+        try:
+            with open(progress_file, 'w', encoding='utf-8') as pf:
+                json.dump(payload, pf, indent=2, ensure_ascii=False)
+        except Exception:
+            pass
+
+    # Persist normalized/migrated progress immediately
+    save_progress(progress.get('current_player_id'))
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
 
-        for i, entry in enumerate(playerids, start=1):
-            pid = entry['playerid']
-            provided_name = entry.get('player_name', '')
+        # Process ids not completed and not in empty_carrer_ids.
+        # ids in need_retry_ids are included so reruns can retry them.
+        ordered_pids = [pid for pid in ordered_input_ids if pid not in completed_set and pid not in empty_carrer_set]
+        if not ordered_pids:
+            print('No playerids to process (all already succeeded).')
+            browser.close()
+            return
+
+        # Summary for resume clarity
+        total_players = len(ordered_input_ids)
+        succeeded = len(completed_set)
+        pending = len(ordered_pids)
+        empty_carrer = len(empty_carrer_set)
+        need_retry = len(need_retry_set)
+        print(f"Resuming scrape: total={total_players}, succeeded={succeeded}, pending={pending}, empty_carrer={empty_carrer}, need_retry={need_retry}")
+        last_current = progress.get('current_player_id')
+        next_pending = ordered_pids[0] if ordered_pids else None
+        print(f"Resume checkpoint current_player_id: {last_current if last_current else 'none'}")
+        print(f"Resuming from next pending player_id: {next_pending if next_pending else 'none'}")
+        total_to_process = len(ordered_pids)
+
+        for i, pid in enumerate(ordered_pids, start=1):
+            provided_name = name_by_pid.get(pid, '')
+            # mark current player being processed and persist immediately
+            save_progress(current_player_id=pid)
             try:
                 url = f'https://atlantichockey.org/playerpage.php?playerid={pid}'
-                print(f'[{i}/{len(playerids)}] Fetching player {pid} -> {url}')
+                print(f'[{i}/{total_to_process}] Fetching player {pid} -> {url}')
                 page.goto(url, timeout=20000)
                 html = page.content()
 
@@ -172,7 +364,9 @@ def main():
 
                 if not career_table:
                     print(f'   No career table found for {pid} ({player_name})')
-                    # still write metadata row placeholder if desired
+                    empty_carrer_set.add(pid)
+                    # Keep need_retry_ids persistent as an audit list.
+                    save_progress(current_player_id=None)
                     time.sleep(0.15)
                     continue
 
@@ -209,25 +403,46 @@ def main():
                     clean = [re.sub(r'<.*?>', '', td).strip() for td in tds]
                     data_rows.append(clean)
 
-                # write to aggregated CSV
-                with open(out_all, 'a', newline='', encoding='utf-8') as ofh:
-                    w = csv.writer(ofh)
-                    if not header_written:
-                        out_header = ['playerid', 'player_name', 'birthday', 'hometown', 'position', 'shoots'] + headers
-                        w.writerow(out_header)
-                        header_written = True
-                    for dr in data_rows:
-                        row = [pid, player_name, birthday, hometown, position, shoots] + dr
-                        w.writerow(row)
+                # write/update aggregated JSON keyed by playerid
+                career_rows = []
+                for dr in data_rows:
+                    row_obj = {}
+                    for idx_col, col_name in enumerate(headers):
+                        row_obj[col_name] = dr[idx_col] if idx_col < len(dr) else ''
+                    career_rows.append(row_obj)
+
+                career_by_player[pid] = {
+                    'player_name': player_name,
+                    'birthday': birthday,
+                    'hometown': hometown,
+                    'position': position,
+                    'shoots': shoots,
+                    'career': career_rows,
+                }
+                save_career_json()
 
                 print(f'   wrote {len(data_rows)} career rows for {pid} ({player_name})')
+                completed_set.add(pid)
+                empty_carrer_set.discard(pid)
+                # Keep need_retry_ids persistent as an audit list.
+                save_progress(current_player_id=None)
                 time.sleep(0.15)
             except Exception as e:
                 print(f'   ERROR fetching {pid}:', e)
+                err_msg = str(e)
+                if is_transient_navigation_error(err_msg):
+                    # Keep transient DNS/network failures in retry list.
+                    need_retry_set.add(pid)
+                    save_progress(current_player_id=None)
+                    continue
+
+                empty_carrer_set.add(pid)
+                # Keep need_retry_ids persistent as an audit list.
+                save_progress(current_player_id=None)
 
         browser.close()
 
-    print('Done. Aggregated career CSV:', out_all)
+    print('Done. Aggregated career JSON:', out_all)
 
 
 if __name__ == '__main__':

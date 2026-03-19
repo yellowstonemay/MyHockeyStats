@@ -27,7 +27,8 @@ from uuid import uuid4
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
-DEFAULT_DATA_DIR = Path(__file__).resolve().parent / "data"
+# Default to the rosters subdirectory after reorganizing CSVs
+DEFAULT_DATA_DIR = Path(__file__).resolve().parent / "data" / "rosters"
 MIGRATION_FILE = (
     ROOT_DIR
     / "backend"

@@ -163,12 +163,17 @@ def scrape_roster_page(page, url):
 
 def main():
     parser = argparse.ArgumentParser(description="Scrape rosters from Atlantic Hockey using a discovered teams CSV file.")
-    parser.add_argument('input_file', help='Input CSV file with discovered teams (e.g., "2025-ayhl-teams.csv")')
-    parser.add_argument('--output', help='Output CSV file for rosters (default: auto-generated from input file name)')
+    parser.add_argument('input_file', nargs='?', default=None, help='Input CSV file with discovered teams (e.g., "2025-ayhl-teams.csv")')
+    parser.add_argument('--season', type=int, default=None, help='Season year (e.g. 2025) to read teams from data/teams')
+    parser.add_argument('--output', help='Output CSV file for rosters (default: auto-generated into data/rosters)')
     parser.add_argument('--delay', type=float, default=0.1, help='Delay between requests (seconds)')
     args = parser.parse_args()
 
     input_file = args.input_file
+
+    # If caller provided a --season but not an explicit input file, use data/teams/{season}-ayhl-teams.csv
+    if not input_file and args.season:
+        input_file = os.path.join(os.path.dirname(__file__), 'data', 'teams', f"{args.season}-ayhl-teams.csv")
 
     # Infer season from filename to provide helpful messages
     season_year_from_filename = None
@@ -176,15 +181,35 @@ def main():
     if match:
         season_year_from_filename = int(match.group(1))
 
-    # Determine output file
+    # Determine output file (default into data/rosters)
     output_file = args.output
     if not output_file:
-        # Generate from input: 2025-ayhl-teams.csv -> 2025-ayhl-rosters.csv
-        output_file = input_file.replace('teams.csv', 'rosters.csv')
-        # As a fallback, if 'teams.csv' isn't in the name
-        if output_file == input_file:
-            base, ext = os.path.splitext(input_file)
-            output_file = f"{base}-rosters.csv"
+        if input_file:
+            # Generate from input: 2025-ayhl-teams.csv -> 2025-ayhl-rosters.csv
+            output_file = input_file.replace('teams.csv', 'rosters.csv')
+
+        # If replacement didn't change input or no input_file provided, construct path under data/rosters
+        if not output_file or output_file == input_file:
+            base_name = None
+            if input_file:
+                base_name = os.path.basename(input_file)
+            elif season_year_from_filename:
+                base_name = f"{season_year_from_filename}-ayhl-teams.csv"
+            else:
+                base_name = 'ayhl-teams.csv'
+
+            base_root = os.path.splitext(base_name)[0]
+            if base_root.endswith('-ayhl-teams'):
+                out_basename = base_root.replace('-ayhl-teams', '-ayhl-rosters') + '.csv'
+            else:
+                out_basename = base_root + '-rosters.csv'
+
+            output_file = os.path.join(os.path.dirname(__file__), 'data', 'rosters', out_basename)
+
+    # Ensure output directory exists
+    out_dir = os.path.dirname(output_file)
+    if out_dir and not os.path.exists(out_dir):
+        os.makedirs(out_dir, exist_ok=True)
 
 
     # Read the discovered teams list
