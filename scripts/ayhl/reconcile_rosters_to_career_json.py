@@ -108,6 +108,17 @@ def has_season(career_rows: list[dict[str, Any]], season_label: str) -> bool:
     return False
 
 
+def get_season_entry(career_rows: list[dict[str, Any]], season_label: str) -> dict[str, Any] | None:
+    season_norm = normalize_text(season_label).lower()
+    if not season_norm:
+        return None
+    for row in career_rows:
+        existing = normalize_text(str(row.get("Season", ""))).lower()
+        if existing == season_norm:
+            return row
+    return None
+
+
 def ensure_progress_schema(progress: dict[str, Any]) -> dict[str, Any]:
     if "current_player_id" not in progress:
         progress["current_player_id"] = None
@@ -209,6 +220,7 @@ def main() -> int:
             shoots = normalize_text(row.get("shot"))
             team_name = normalize_text(row.get("team") or row.get("team_name"))
             league_name = normalize_text(row.get("league_name") or row.get("leagueid"))
+            number = normalize_text(row.get("number"))
             season_label = season_label_from_row(row)
 
             if player_id not in career_data:
@@ -239,22 +251,26 @@ def main() -> int:
                 career_rows = []
                 player_obj["career"] = career_rows
 
-            if season_label and not has_season(career_rows, season_label):
+            existing_season = get_season_entry(career_rows, season_label) if season_label else None
+
+            if season_label and existing_season is None:
                 career_rows.append(
                     {
                         "Season": season_label,
                         "League": league_name,
                         "Teams": team_name,
+                        "number": number,
                         "Games": "",
                         "Goals": "",
                         "Assists": "",
                         "Points": "",
                         "Penalties": "",
                         "PIM": "",
-                        "RosterRow": dict(row),
                     }
                 )
                 created_seasons += 1
+            elif existing_season is not None and number and not normalize_text(existing_season.get("number")):
+                existing_season["number"] = number
 
     print("=" * 70)
     print("ROSTER -> CAREER JSON RECONCILE")
