@@ -1,16 +1,14 @@
-"""Load AYHL roster CSV files into the integration import tables.
+"""Load AYHL roster CSV files into the ayhl_roster table.
 
-This script scans all ``*-ayhl-rosters.csv`` files under ``scripts/ayhl/data``
-and loads player identity rows into the integration tables used by the backend.
-
-It is intended for development and testing with real roster data.
+This script scans all ``*-ayhl-rosters.csv`` files under the rosters data dir
+and upserts every raw player row into the ayhl_roster table.
 
 Usage:
     python scripts/ayhl/load_rosters_to_db.py
 
 Optional examples:
     python scripts/ayhl/load_rosters_to_db.py --dry-run
-    python scripts/ayhl/load_rosters_to_db.py --data-dir scripts/ayhl/data
+    python scripts/ayhl/load_rosters_to_db.py --data-dir scripts/ayhl/data/rosters
     python scripts/ayhl/load_rosters_to_db.py --host localhost --port 5432
 """
 
@@ -18,44 +16,32 @@ from __future__ import annotations
 
 import argparse
 import csv
-import hashlib
 import sys
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
-from typing import Iterable
 from uuid import uuid4
 
 
-ROOT_DIR = Path(__file__).resolve().parents[2]
-# Default to the rosters subdirectory after reorganizing CSVs
 DEFAULT_DATA_DIR = Path(__file__).resolve().parent / "data" / "rosters"
-MIGRATION_FILE = (
-    ROOT_DIR
-    / "backend"
-    / "src"
-    / "main"
-    / "resources"
-    / "db"
-    / "migration"
-    / "V20260312_01__integration_core_tables.sql"
-)
 
 
 @dataclass
 class Counters:
     processed: int = 0
-    accepted: int = 0
+    upserted: int = 0
     rejected: int = 0
-    duplicate_skipped: int = 0
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Load AYHL roster CSV files into PostgreSQL")
-    parser.add_argument("--host", default="localhost", help="PostgreSQL host")
-    parser.add_argument("--port", type=int, default=5432, help="PostgreSQL port")
-    parser.add_argument("--dbname", default="myhockeystats", help="PostgreSQL database name")
-    parser.add_argument("--user", default="postgres", help="PostgreSQL user")
-    parser.add_argument("--password", default="postgres", help="PostgreSQL password")
+    parser = argparse.ArgumentParser(
+        description="Load AYHL roster CSV files into PostgreSQL (ayhl_roster)"
+    )
+    parser.add_argument("--host", default="localhost")
+    parser.add_argument("--port", type=int, default=5432)
+    parser.add_argument("--dbname", default="myhockeystats")
+    parser.add_argument("--user", default="postgres")
+    parser.add_argument("--password", default="postgres")
     parser.add_argument(
         "--data-dir",
         default=str(DEFAULT_DATA_DIR),
@@ -67,25 +53,6 @@ def parse_args() -> argparse.Namespace:
         help="Parse files and report counts without writing to the database",
     )
     return parser.parse_args()
-
-
-def normalize_player_name(raw_name: str) -> str:
-    cleaned = " ".join(raw_name.replace('"', '').strip().split())
-    if not cleaned:
-        return ""
-
-    if "," in cleaned:
-        last_name, first_name = [part.strip() for part in cleaned.split(",", 1)]
-        cleaned = f"{first_name} {last_name}".strip()
-
-    lowered = cleaned.lower()
-    allowed = []
-    for char in lowered:
-        if char.isalnum() or char.isspace():
-            allowed.append(char)
-        else:
-            allowed.append(" ")
-    return " ".join("".join(allowed).split())
 
 
 def parse_birthdate(raw_birthdate: str) -> tuple[int, int]:
@@ -113,180 +80,119 @@ def season_label_from_year(raw_year: str) -> str:
         start_year = int(raw_year)
     except ValueError:
         return raw_year.strip()
-    return f"{start_year}-{start_year + 1}"
+    return f"{start_year}-{start_year + 1} Season"
 
 
-def source_hash_for_row(row: dict[str, str]) -> str:
-    payload = "|".join(
-        [
-            row.get("season_year", "").strip(),
-            row.get("leagueid", "").strip(),
-            row.get("teamid", "").strip(),
-            row.get("team", "").strip(),
-            row.get("player", "").strip(),
-            row.get("birthdate", "").strip(),
-            row.get("hometown", "").strip(),
-        ]
-    )
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+def ensure_table(conn) -> None:
+    """Create ayhl_roster table if it does not exist."""
+    with conn.cursor() as cur:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS ayhl_roster (
+                id              UUID            PRIMARY KEY,
+                season_year     INTEGER         NOT NULL,
+                season_id       VARCHAR(32),
+                league_id       VARCHAR(32),
+                team_id         VARCHAR(32),
+                team_name       VARCHAR(255),
+                player_id       VARCHAR(128),
+                player_name_raw VARCHAR(255)    NOT NULL,
+                jersey_number   VARCHAR(16),
+                position        VARCHAR(16),
+                height          VARCHAR(16),
+                weight          VARCHAR(16),
+                shoots          VARCHAR(8),
+                birth_month     INTEGER,
+                birth_year      INTEGER,
+                hometown        VARCHAR(255),
+                season_label    VARCHAR(32)     NOT NULL,
+                scraped_at      TIMESTAMP       NOT NULL,
+                UNIQUE (season_year, league_id, team_id, player_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_ayhl_roster_season_player
+                ON ayhl_roster (season_label, player_id);
+        """)
+    conn.commit()
 
 
-def iter_roster_files(data_dir: Path) -> Iterable[Path]:
-    return sorted(data_dir.glob("*-ayhl-rosters.csv"))
-
-
-def ensure_integration_schema(connection) -> None:
-    if not MIGRATION_FILE.exists():
-        raise FileNotFoundError(f"Migration file not found: {MIGRATION_FILE}")
-
-    with connection.cursor() as cursor:
-        cursor.execute(MIGRATION_FILE.read_text(encoding="utf-8"))
-        cursor.execute(
-            "ALTER TABLE integration_imported_player_record ADD COLUMN IF NOT EXISTS source_team_name VARCHAR(255)"
-        )
-        cursor.execute(
-            "ALTER TABLE integration_imported_player_record ADD COLUMN IF NOT EXISTS source_club_name VARCHAR(255)"
-        )
-    connection.commit()
-
-
-def create_import_run(connection) -> str:
-    run_id = str(uuid4())
-    with connection.cursor() as cursor:
-        cursor.execute(
-            """
-            INSERT INTO integration_import_run (
-                id, source, trigger_type, status, started_at,
-                processed_count, accepted_count, rejected_count, duplicate_skipped_count
-            )
-            VALUES (%s, %s, %s, %s, NOW(), 0, 0, 0, 0)
-            """,
-            (run_id, "AYHL", "OPERATOR_MANUAL", "RUNNING"),
-        )
-    connection.commit()
-    return run_id
-
-
-def finalize_import_run(connection, run_id: str, counters: Counters) -> None:
-    with connection.cursor() as cursor:
-        cursor.execute(
-            """
-            UPDATE integration_import_run
-            SET status = %s,
-                ended_at = NOW(),
-                processed_count = %s,
-                accepted_count = %s,
-                rejected_count = %s,
-                duplicate_skipped_count = %s
-            WHERE id = %s
-            """,
-            (
-                "COMPLETED",
-                counters.processed,
-                counters.accepted,
-                counters.rejected,
-                counters.duplicate_skipped,
-                run_id,
-            ),
-        )
-    connection.commit()
-
-
-def insert_player_record(connection, run_id: str, row: dict[str, str]) -> bool:
-    player_name_raw = row.get("player", "").strip()
-    player_name_normalized = normalize_player_name(player_name_raw)
+def upsert_row(conn, row: dict[str, str], scraped_at: datetime) -> None:
     birth_month, birth_year = parse_birthdate(row.get("birthdate", ""))
-    season_label = season_label_from_year(row.get("season_year", ""))
-    source_hash = source_hash_for_row(row)
-
-    if not player_name_raw or not player_name_normalized or birth_month == 0 or birth_year == 0:
-        return False
-
-    with connection.cursor() as cursor:
-        cursor.execute(
+    season_year_str = row.get("season_year", "").strip()
+    label = season_label_from_year(season_year_str)
+    with conn.cursor() as cur:
+        cur.execute(
             """
-            INSERT INTO integration_imported_player_record (
-                id,
-                source,
-                source_player_id,
-                source_team_id,
-                source_team_name,
-                source_club_id,
-                source_club_name,
-                player_name_raw,
-                player_name_normalized,
-                birth_month,
-                birth_year,
-                season_label,
-                import_run_id,
-                source_hash,
-                created_at
-            )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
-            ON CONFLICT (source, source_hash) DO UPDATE
-            SET source_team_id = EXCLUDED.source_team_id,
-                source_team_name = EXCLUDED.source_team_name,
-                source_club_id = EXCLUDED.source_club_id,
-                source_club_name = EXCLUDED.source_club_name,
-                season_label = EXCLUDED.season_label,
-                import_run_id = EXCLUDED.import_run_id
+            INSERT INTO ayhl_roster (
+                id, season_year, season_id, league_id, team_id, team_name,
+                player_id, player_name_raw, jersey_number, position,
+                height, weight, shoots, birth_month, birth_year, hometown,
+                season_label, scraped_at
+            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            ON CONFLICT (season_year, league_id, team_id, player_id) DO UPDATE SET
+                season_id       = EXCLUDED.season_id,
+                team_name       = EXCLUDED.team_name,
+                player_name_raw = EXCLUDED.player_name_raw,
+                jersey_number   = EXCLUDED.jersey_number,
+                position        = EXCLUDED.position,
+                height          = EXCLUDED.height,
+                weight          = EXCLUDED.weight,
+                shoots          = EXCLUDED.shoots,
+                birth_month     = EXCLUDED.birth_month,
+                birth_year      = EXCLUDED.birth_year,
+                hometown        = EXCLUDED.hometown,
+                season_label    = EXCLUDED.season_label,
+                scraped_at      = EXCLUDED.scraped_at
             """,
             (
                 str(uuid4()),
-                "AYHL",
-                None,
+                int(season_year_str) if season_year_str.isdigit() else None,
+                row.get("seasonid", "").strip() or None,
+                row.get("leagueid", "").strip() or None,
                 row.get("teamid", "").strip() or None,
                 row.get("team", "").strip() or None,
-                row.get("leagueid", "").strip() or None,
-                "AYHL",
-                player_name_raw,
-                player_name_normalized,
-                birth_month,
-                birth_year,
-                season_label,
-                run_id,
-                source_hash,
+                row.get("playerid", "").strip() or None,
+                row.get("player", "").strip(),
+                row.get("number", "").strip() or None,
+                row.get("pos", "").strip() or None,
+                row.get("ht", "").strip() or None,
+                row.get("wt", "").strip() or None,
+                row.get("shot", "").strip() or None,
+                birth_month or None,
+                birth_year or None,
+                row.get("hometown", "").strip() or None,
+                label,
+                scraped_at,
             ),
         )
-        return cursor.rowcount == 1
 
 
-def load_rosters(connection, data_dir: Path, dry_run: bool) -> Counters:
+
+
+
+def load_rosters(conn, data_dir: Path, dry_run: bool) -> Counters:
     counters = Counters()
-    files = list(iter_roster_files(data_dir))
+    files = sorted(data_dir.glob("*-ayhl-rosters.csv"))
     if not files:
         raise FileNotFoundError(f"No *-ayhl-rosters.csv files found in {data_dir}")
 
-    run_id = None if dry_run else create_import_run(connection)
+    scraped_at = datetime.utcnow()
 
     for csv_file in files:
-        print(f"Processing {csv_file.name}")
-        with csv_file.open("r", encoding="utf-8", newline="") as handle:
-            reader = csv.DictReader(handle)
+        print(f"  Processing {csv_file.name}")
+        with csv_file.open("r", encoding="utf-8", newline="") as fh:
+            reader = csv.DictReader(fh)
             for row in reader:
                 counters.processed += 1
-
-                player_name_raw = row.get("player", "").strip()
-                birth_month, birth_year = parse_birthdate(row.get("birthdate", ""))
-                if not player_name_raw or birth_month == 0 or birth_year == 0:
+                if not row.get("player", "").strip():
                     counters.rejected += 1
                     continue
-
                 if dry_run:
-                    counters.accepted += 1
+                    counters.upserted += 1
                     continue
-
-                inserted = insert_player_record(connection, run_id, row)
-                if inserted:
-                    counters.accepted += 1
-                else:
-                    counters.duplicate_skipped += 1
+                upsert_row(conn, row, scraped_at)
+                counters.upserted += 1
 
         if not dry_run:
-            connection.commit()
-
-    if not dry_run and run_id is not None:
-        finalize_import_run(connection, run_id, counters)
+            conn.commit()
 
     return counters
 
@@ -301,11 +207,9 @@ def main() -> int:
             print("=" * 60)
             print("DRY RUN")
             print("=" * 60)
-            print(f"Processed:         {counters.processed}")
-            print(f"Inserted/Accepted: {counters.accepted}")
-            print(f"Rejected:          {counters.rejected}")
-            print(f"Duplicate skipped: {counters.duplicate_skipped}")
-            print(f"Data directory:    {data_dir}")
+            print(f"Processed: {counters.processed}")
+            print(f"Upserted:  {counters.upserted}")
+            print(f"Rejected:  {counters.rejected}")
             return 0
         except Exception as exc:
             print(f"Loader failed: {exc}", file=sys.stderr)
@@ -314,43 +218,38 @@ def main() -> int:
     try:
         import psycopg2
     except ModuleNotFoundError:
-        print(
-            "psycopg2 is required for database loading. Install it with: pip install psycopg2-binary",
-            file=sys.stderr,
+        print("psycopg2 required: pip install psycopg2-binary", file=sys.stderr)
+        return 1
+
+    import psycopg2
+
+    try:
+        conn = psycopg2.connect(
+            host=args.host, port=args.port, dbname=args.dbname,
+            user=args.user, password=args.password,
         )
+    except Exception as exc:
+        print(f"DB connection failed: {exc}", file=sys.stderr)
         return 1
 
     try:
-        connection = psycopg2.connect(
-            host=args.host,
-            port=args.port,
-            dbname=args.dbname,
-            user=args.user,
-            password=args.password,
-        )
-    except Exception as exc:  # pragma: no cover - connection failures are runtime-dependent
-        print(f"Failed to connect to PostgreSQL: {exc}", file=sys.stderr)
-        return 1
-
-    try:
-        ensure_integration_schema(connection)
-
-        counters = load_rosters(connection, data_dir, False)
+        ensure_table(conn)
+        counters = load_rosters(conn, data_dir, False)
         print("=" * 60)
         print("LOAD COMPLETE")
         print("=" * 60)
-        print(f"Processed:         {counters.processed}")
-        print(f"Inserted/Accepted: {counters.accepted}")
-        print(f"Rejected:          {counters.rejected}")
-        print(f"Duplicate skipped: {counters.duplicate_skipped}")
-        print(f"Data directory:    {data_dir}")
+        print(f"Processed: {counters.processed}")
+        print(f"Upserted:  {counters.upserted}")
+        print(f"Rejected:  {counters.rejected}")
         return 0
     except Exception as exc:
-        connection.rollback()
-        print(f"Loader failed: {exc}", file=sys.stderr)
+        conn.rollback()
+        print(f"Load failed: {exc}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
         return 1
     finally:
-        connection.close()
+        conn.close()
 
 
 if __name__ == "__main__":

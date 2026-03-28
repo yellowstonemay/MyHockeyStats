@@ -17,11 +17,13 @@ Usage:
 
 import argparse
 import csv
+import os
 import time
 from playwright.sync_api import sync_playwright
 
 # Mapping from provided season year to site seasonid
 SEASON_TO_ID = {
+    2026: 34,
     2025: 33,
     2024: 32,
     2023: 31,
