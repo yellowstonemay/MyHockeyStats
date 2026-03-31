@@ -205,13 +205,13 @@ Extend Seasons endpoint to support parent viewing of linked child data using exi
 
 ---
 
-- [ ] T019 [US2] Extend SeasonsController authorization in backend/src/main/java/com/myhockeystats/api/SeasonsController.java:
+- [x] T019 [US2] Extend SeasonsController authorization in backend/src/main/java/com/myhockeystats/api/SeasonsController.java:
   - Update GET /api/players/{playerId}/seasons endpoint to call IntegrationAccessGuard.canViewSeasons()
   - Verify IntegrationAccessGuard.canViewSeasons() checks both player self-access and parent link
   - Return 401 Unauthorized if user is neither player nor linked parent
   - Log authorization checks for audit (INFO level)
 
-- [ ] T020 [US2] Add parent access integration tests in backend/src/test/java/com/myhockeystats/api/SeasonsControllerParentAccessTest.java:
+- [x] T020 [US2] Add parent access integration tests in backend/src/test/java/com/myhockeystats/api/SeasonsControllerParentAccessTest.java:
   - Test parent linked to player can view child's seasons (200)
   - Test parent not linked to player cannot view seasons (401)
   - Test multiple linked children: parent sees data only for linked player (200)
@@ -219,7 +219,7 @@ Extend Seasons endpoint to support parent viewing of linked child data using exi
   - Use Testcontainers + pre-populate AccountLink table for test data
   - Coverage target: > 80%
 
-- [ ] T021 [US2] Update frontend API client in frontend/web/src/lib/api.js:
+- [x] T021 [US2] Update frontend API client in frontend/web/src/lib/integrationsApi.js:
   - Ensure fetchPlayerSeasons(playerId, accessToken) works for both player and parent viewing
   - Parent views child profile: pass child's playerId
   - API authorization handled server-side (no frontend changes needed)
