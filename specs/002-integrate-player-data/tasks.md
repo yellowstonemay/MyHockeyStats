@@ -58,13 +58,13 @@ Set up database schema changes and define core data transfer objects that all su
 
 ---
 
-- [ ] T001 Create database migration to add functional indexes on normalized player name in backend/src/main/resources/db/migration/V[X]__add_career_lookup_indexes.sql
+- [x] T001 Create database migration to add functional indexes on normalized player name in backend/src/main/resources/db/migration/V[X]__add_career_lookup_indexes.sql
 
-- [ ] T002 Create database migration to mark player_identity_map table as deprecated in backend/src/main/resources/db/migration/V[X+1]__deprecate_identity_map_table.sql
+- [x] T002 Create database migration to mark player_identity_map table as deprecated in backend/src/main/resources/db/migration/V[X+1]__deprecate_identity_map_table.sql
 
-- [ ] T003 [P] Create SeasonCareerRecordDto in backend/src/main/java/com/myhockeystats/api/dto/integration/SeasonCareerRecordDto.java (source, sourcePlayerId, playerName, season, club, team, jerseyNumber, gamesPlayed, goals, assists, points, penalties, pim, importedAt, isAmbiguousMembership, ambiguityNote)
+- [x] T003 [P] Create SeasonCareerRecordDto in backend/src/main/java/com/myhockeystats/api/dto/integration/SeasonCareerRecordDto.java (source, sourcePlayerId, playerName, season, club, team, jerseyNumber, gamesPlayed, goals, assists, points, penalties, pim, importedAt, isAmbiguousMembership, ambiguityNote)
 
-- [ ] T004 [P] Create SeasonsResponseDto in backend/src/main/java/com/myhockeystats/api/dto/integration/SeasonsResponseDto.java (playerId, playerName, records list, hasAmbiguity, ambiguityNote, availableSources set, emptySources set, fetchedAt, cacheControl)
+- [x] T004 [P] Create SeasonsResponseDto in backend/src/main/java/com/myhockeystats/api/dto/integration/SeasonsResponseDto.java (playerId, playerName, records list, hasAmbiguity, ambiguityNote, availableSources set, emptySources set, fetchedAt, cacheControl)
 
 ---
 
@@ -83,20 +83,20 @@ Implement core career lookup service, repository methods, and Seasons endpoint w
 
 ---
 
-- [ ] T005 [P] [US1] Add findByNormalizedName repository method in backend/src/main/java/com/myhockeystats/repository/AyhlPlayerCareerRepository.java with @Query() using LOWER(TRIM(r.playerName))
+- [x] T005 [P] [US1] Add findByNormalizedName repository method in backend/src/main/java/com/myhockeystats/repository/AyhlPlayerCareerRepository.java with @Query() using LOWER(TRIM(r.playerName))
 
-- [ ] T006 [P] [US1] Add findByNormalizedName repository method in backend/src/main/java/com/myhockeystats/repository/ThfPlayerCareerRepository.java with @Query() using LOWER(TRIM(r.playerName))
+- [x] T006 [P] [US1] Add findByNormalizedName repository method in backend/src/main/java/com/myhockeystats/repository/ThfPlayerCareerRepository.java with @Query() using LOWER(TRIM(r.playerName))
 
-- [ ] T007 [P] [US1] Add findByNormalizedName repository method in backend/src/main/java/com/myhockeystats/repository/AhfPlayerCareerRepository.java with @Query() using LOWER(TRIM(r.playerName))
+- [x] T007 [P] [US1] Add findByNormalizedName repository method in backend/src/main/java/com/myhockeystats/repository/AhfPlayerCareerRepository.java with @Query() using LOWER(TRIM(r.playerName))
 
-- [ ] T008 [US1] Create CareerLookupService in backend/src/main/java/com/myhockeystats/service/integration/CareerLookupService.java with:
+- [x] T008 [US1] Create CareerLookupService in backend/src/main/java/com/myhockeystats/service/integration/CareerLookupService.java with:
   - normalizePlayerName(String fullName) static method (lowercase, trim, remove ['-\.], normalize whitespace)
   - lookupCareerRecordsByName(String playerName) method that queries all three repositories
   - toSeasonDtos(List<?> records, String source) helper to convert entities to DTOs
   - ambiguity detection logic (multiple distinct sourceIds for same name)
   - sorting by season DESC then source ASC
 
-- [ ] T009 [US1] Create SeasonsController endpoint in backend/src/main/java/com/myhockeystats/api/SeasonsController.java:
+- [x] T009 [US1] Create SeasonsController endpoint in backend/src/main/java/com/myhockeystats/api/SeasonsController.java:
   - GET /api/players/{playerId}/seasons endpoint (authentication required)
   - Extract playerId from path
   - Call IntegrationAccessGuard.canViewSeasons(userId, playerId) for authorization
@@ -104,17 +104,17 @@ Implement core career lookup service, repository methods, and Seasons endpoint w
   - Return SeasonsResponseDto with Cache-Control header (private, max-age=300)
   - Handle 401 Unauthorized, 404 Player Not Found errors
 
-- [ ] T010 [US1] Extend IntegrationAccessGuard in backend/src/main/java/com/myhockeystats/security/IntegrationAccessGuard.java:
+- [x] T010 [US1] Extend IntegrationAccessGuard in backend/src/main/java/com/myhockeystats/security/IntegrationAccessGuard.java:
   - Add canViewSeasons(String userId, String playerId) method
   - Check userId == playerId (player viewing own data)
   - Check AccountLink.findByParentIdAndChildId(userId, playerId).isPresent() (parent viewing child)
   - Return boolean indicating authorization
 
-- [ ] T011 [US1] Update PlayerProfileService in backend/src/main/java/com/myhockeystats/service/PlayerProfileService.java:
+- [x] T011 [US1] Update PlayerProfileService in backend/src/main/java/com/myhockeystats/service/PlayerProfileService.java:
   - Ensure getPlayerProfile(String playerId) returns complete Player with name field populated
   - Used by SeasonsController to get player name for career lookup
 
-- [ ] T012 [US1] Create unit tests in backend/src/test/java/com/myhockeystats/service/integration/CareerLookupServiceTest.java:
+- [x] T012 [US1] Create unit tests in backend/src/test/java/com/myhockeystats/service/integration/CareerLookupServiceTest.java:
   - Test normalizePlayerName() with various inputs (hyphenated names, apostrophes, multiple spaces)
   - Test lookupCareerRecordsByName() returns union of records from all three sources
   - Test ambiguity detection when multiple sourceIds found
@@ -122,7 +122,7 @@ Implement core career lookup service, repository methods, and Seasons endpoint w
   - Test empty results handling
   - Coverage target: > 80%
 
-- [ ] T013 [US1] Create integration tests in backend/src/test/java/com/myhockeystats/api/SeasonsControllerIntegrationTest.java:
+- [x] T013 [US1] Create integration tests in backend/src/test/java/com/myhockeystats/api/SeasonsControllerIntegrationTest.java:
   - Test GET /api/players/{playerId}/seasons returns 200 with all matching records
   - Test authorization: player can view own data (200), non-player cannot (401)
   - Test Cache-Control header is present and correct
