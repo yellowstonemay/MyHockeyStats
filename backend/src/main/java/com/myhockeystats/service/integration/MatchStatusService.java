@@ -3,19 +3,18 @@ package com.myhockeystats.service.integration;
 import com.myhockeystats.api.dto.integration.IntegrationDtos.MatchCandidateDto;
 import com.myhockeystats.api.dto.integration.IntegrationDtos.MatchLinkDto;
 import com.myhockeystats.api.dto.integration.IntegrationDtos.MatchStatusDto;
+import java.util.HashMap;
 import java.util.List;
-import java.util.UUID;
+import java.util.Map;
 import org.springframework.stereotype.Service;
 
 @Service
 public class MatchStatusService {
 
     private final IntegrationDataService integrationDataService;
-    private final FuzzyMatchService fuzzyMatchService;
 
-    public MatchStatusService(IntegrationDataService integrationDataService, FuzzyMatchService fuzzyMatchService) {
+    public MatchStatusService(IntegrationDataService integrationDataService) {
         this.integrationDataService = integrationDataService;
-        this.fuzzyMatchService = fuzzyMatchService;
     }
 
     public MatchStatusDto getStatusForUser(Long userId, String fullName, int birthYear, int birthMonth) {
@@ -27,49 +26,41 @@ public class MatchStatusService {
         var playerContext = context.get();
         String birthMonthYear = String.format("%04d-%02d", playerContext.birthYear(), playerContext.birthMonth());
 
-        List<MatchLinkDto> persistedLinks = integrationDataService.findPersistedLinks(userId).stream()
-                .map(link -> new MatchLinkDto(link.source(), link.importedPlayerRecordId(), link.linkState(), link.lastVerifiedAt()))
+        List<MatchLinkDto> persistedLinks = integrationDataService.findPersistedIdentityLinks(userId).stream()
+                .map(link -> new MatchLinkDto(link.source(), link.sourcePlayerId(), link.linkState(), link.lastVerifiedAt()))
                 .toList();
         if (!persistedLinks.isEmpty()) {
             return new MatchStatusDto("LINKED", birthMonthYear, List.of(), persistedLinks);
         }
 
-        List<IntegrationDataService.ImportedPlayerRecord> matchedRecords = integrationDataService.findBestMatches(playerContext, null);
-        if (!matchedRecords.isEmpty()) {
-            List<MatchLinkDto> inferredLinks = matchedRecords.stream()
-                    .map(match -> new MatchLinkDto(match.source(), match.id(), "CONFIRMED", null))
+        List<IntegrationDataService.CareerCandidateRecord> careerCandidates = integrationDataService.findCareerCandidates(playerContext);
+        if (careerCandidates.isEmpty()) {
+            return new MatchStatusDto("NO_MATCH", birthMonthYear, List.of(), List.of());
+        }
+
+        Map<String, Integer> sourceCandidateCounts = new HashMap<>();
+        for (IntegrationDataService.CareerCandidateRecord candidate : careerCandidates) {
+            sourceCandidateCounts.merge(candidate.source(), 1, Integer::sum);
+        }
+
+        boolean ambiguousBySource = sourceCandidateCounts.values().stream().anyMatch(count -> count > 1);
+        if (!ambiguousBySource) {
+            List<MatchLinkDto> inferredLinks = careerCandidates.stream()
+                    .map(candidate -> new MatchLinkDto(candidate.source(), candidate.sourcePlayerId(), "CONFIRMED", null))
                     .toList();
             return new MatchStatusDto("LINKED", birthMonthYear, List.of(), inferredLinks);
         }
 
-        List<MatchCandidateDto> candidates = integrationDataService.findBirthMonthYearMatches(
-                        playerContext.birthYear(), playerContext.birthMonth()).stream()
-                .map(candidate -> {
-                    FuzzyMatchService.MatchResult score = fuzzyMatchService.score(
-                            playerContext.displayName(),
-                            playerContext.birthYear(),
-                            playerContext.birthMonth(),
-                            candidate.playerNameRaw(),
-                            candidate.birthYear(),
-                            candidate.birthMonth());
-                    if (!score.accepted()) {
-                        return null;
-                    }
-                    return new MatchCandidateDto(
-                            candidate.id(),
-                            candidate.source(),
-                            candidate.playerNameRaw(),
-                            candidate.seasonLabel(),
-                            score.method().name(),
-                            score.score(),
-                            List.of(score.reason()));
-                })
-                .filter(candidate -> candidate != null)
+        List<MatchCandidateDto> candidates = careerCandidates.stream()
+                .map(candidate -> new MatchCandidateDto(
+                        candidate.sourcePlayerId(),
+                        candidate.source(),
+                        candidate.playerName(),
+                        candidate.seasonLabel(),
+                        "EXACT_NORMALIZED",
+                        1.0,
+                        List.of("Exact normalized name match in career data")))
                 .toList();
-
-        if (candidates.isEmpty()) {
-            return new MatchStatusDto("NO_MATCH", birthMonthYear, List.of(), List.of());
-        }
 
         return new MatchStatusDto(
                 "AMBIGUOUS_SELECTION_REQUIRED",
@@ -79,12 +70,12 @@ public class MatchStatusService {
     }
 
     public int confirmUserLinks(Long userId, List<ConfirmedCandidate> selectedCandidates) {
-        List<UUID> selectedIds = selectedCandidates.stream()
-                .map(ConfirmedCandidate::candidateId)
+    List<IntegrationDataService.ConfirmedIdentitySelection> selectedIds = selectedCandidates.stream()
+        .map(candidate -> new IntegrationDataService.ConfirmedIdentitySelection(candidate.source(), candidate.candidateId()))
                 .toList();
-        return integrationDataService.replaceConfirmedLinks(userId, selectedIds);
+    return integrationDataService.replaceConfirmedIdentityLinks(userId, selectedIds);
     }
 
-    public record ConfirmedCandidate(String source, UUID candidateId) {
+    public record ConfirmedCandidate(String source, String candidateId) {
     }
 }

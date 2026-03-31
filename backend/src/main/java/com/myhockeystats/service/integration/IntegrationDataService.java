@@ -1,13 +1,11 @@
 package com.myhockeystats.service.integration;
 
 import com.myhockeystats.repository.PlayerProfileRepository;
-import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.sql.Timestamp;
-import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
@@ -54,155 +52,344 @@ public class IntegrationDataService {
                 });
     }
 
-    public List<ImportedPlayerRecord> findExactMatches(PlayerContext context) {
-        return findExactMatches(context, null);
-    }
-
-    public List<ImportedPlayerRecord> findExactMatches(PlayerContext context, String seasonLabel) {
-        String baseSql = """
-                SELECT id, source, player_name_raw, player_name_normalized, birth_month, birth_year,
-                       season_label, source_team_id, COALESCE(source_team_name, source_team_id) AS source_team_name,
-                       source_club_id, COALESCE(source_club_name, source) AS source_club_name
-                FROM integration_imported_player_record
-                WHERE player_name_normalized = ? AND birth_year = ? AND birth_month = ?
+    public List<CareerHistoryRecord> findCareerHistory(PlayerContext context, String seasonLabel) {
+        String normalizedExpr = """
+                TRIM(REGEXP_REPLACE(
+                    LOWER(REGEXP_REPLACE(COALESCE(player_name, ''), '[^a-zA-Z0-9 ]', ' ', 'g')),
+                    '\\s+',
+                    ' ',
+                    'g'
+                ))
                 """;
 
-        List<Object> args = new ArrayList<>(List.of(context.normalizedName(), context.birthYear(), context.birthMonth()));
+        String sql = """
+            SELECT source, source_player_id, season_label, source_club_name, source_team_name,
+                   jersey_number, games_played, goals, assists, points, penalties, pim
+                FROM (
+                    SELECT
+                        'AYHL' AS source,
+                        source_player_id,
+                        season_label,
+                        COALESCE(league_name, 'AYHL') AS source_club_name,
+                        COALESCE(team_name, 'Unknown Team') AS source_team_name,
+                        jersey_number,
+                        games_played,
+                        goals,
+                        assists,
+                        points,
+                        penalties,
+                        CAST(pim AS DOUBLE PRECISION) AS pim,
+                        %s AS normalized_name
+                    FROM ayhl_player_career
+
+                    UNION ALL
+
+                    SELECT
+                        'THF' AS source,
+                        source_player_id,
+                        season_label,
+                        COALESCE(league_name, 'THF') AS source_club_name,
+                        COALESCE(team_name, 'Unknown Team') AS source_team_name,
+                        jersey_number,
+                        games_played,
+                        goals,
+                        assists,
+                        points,
+                        penalties,
+                        CAST(pim AS DOUBLE PRECISION) AS pim,
+                        %s AS normalized_name
+                    FROM thf_player_career
+
+                    UNION ALL
+
+                    SELECT
+                        'AHF' AS source,
+                        source_player_id,
+                        season_label,
+                        COALESCE(league_name, 'AHF') AS source_club_name,
+                        COALESCE(team_name, 'Unknown Team') AS source_team_name,
+                        jersey_number,
+                        games_played,
+                        goals,
+                        assists,
+                        points,
+                        penalties,
+                        CAST(pim AS DOUBLE PRECISION) AS pim,
+                        %s AS normalized_name
+                    FROM ahf_player_career
+                ) careers
+                WHERE %%s
+                """.formatted(normalizedExpr, normalizedExpr, normalizedExpr);
+
+            NameMatchClause nameMatchClause = buildNameMatchClause(context.normalizedName());
+            sql = sql.formatted(nameMatchClause.sql());
+            List<Object> args = new ArrayList<>(nameMatchClause.args());
         if (seasonLabel != null && !seasonLabel.isBlank()) {
-            baseSql += " AND season_label = ?";
+            sql += " AND season_label = ?";
             args.add(seasonLabel);
         }
-        baseSql += " ORDER BY season_label DESC, source, source_team_name";
-        return jdbcTemplate.query(baseSql, importedPlayerRecordRowMapper(), args.toArray());
-    }
+        sql += " ORDER BY season_label DESC, source, source_team_name";
 
-    public List<ImportedPlayerRecord> findExactNameYearMatches(PlayerContext context) {
-        return findExactNameYearMatches(context, null);
-    }
-
-    public List<ImportedPlayerRecord> findExactNameYearMatches(PlayerContext context, String seasonLabel) {
-        String baseSql = """
-                SELECT id, source, player_name_raw, player_name_normalized, birth_month, birth_year,
-                       season_label, source_team_id, COALESCE(source_team_name, source_team_id) AS source_team_name,
-                       source_club_id, COALESCE(source_club_name, source) AS source_club_name
-                FROM integration_imported_player_record
-                WHERE player_name_normalized = ? AND birth_year = ?
-                """;
-
-        List<Object> args = new ArrayList<>(List.of(context.normalizedName(), context.birthYear()));
-        if (seasonLabel != null && !seasonLabel.isBlank()) {
-            baseSql += " AND season_label = ?";
-            args.add(seasonLabel);
-        }
-        baseSql += " ORDER BY season_label DESC, source, source_team_name";
-        return jdbcTemplate.query(baseSql, importedPlayerRecordRowMapper(), args.toArray());
-    }
-
-    public List<ImportedPlayerRecord> findBestMatches(PlayerContext context, String seasonLabel) {
-        List<ImportedPlayerRecord> exactMatches = findExactMatches(context, seasonLabel);
-        if (!exactMatches.isEmpty()) {
-            return exactMatches;
-        }
-        return findExactNameYearMatches(context, seasonLabel);
-    }
-
-    public List<ImportedPlayerRecord> findBirthMonthYearMatches(int birthYear, int birthMonth) {
-        String sql = """
-                SELECT id, source, player_name_raw, player_name_normalized, birth_month, birth_year,
-                       season_label, source_team_id, COALESCE(source_team_name, source_team_id) AS source_team_name,
-                       source_club_id, COALESCE(source_club_name, source) AS source_club_name
-                FROM integration_imported_player_record
-                WHERE birth_year = ? AND birth_month = ?
-                ORDER BY season_label DESC, source, player_name_raw
-                LIMIT 50
-                """;
-        return jdbcTemplate.query(sql, importedPlayerRecordRowMapper(), birthYear, birthMonth);
-    }
-
-    public List<MatchLinkRow> findPersistedLinks(Long userId) {
-        String sql = """
-                SELECT ml.source, ml.imported_player_record_id, ml.link_state, ml.last_verified_at
-                FROM integration_match_link ml
-                WHERE ml.user_id = ?
-                ORDER BY ml.source, ml.last_verified_at DESC NULLS LAST
-                """;
-        return jdbcTemplate.query(sql, (rs, rowNum) -> new MatchLinkRow(
+        return jdbcTemplate.query(sql, (rs, rowNum) -> new CareerHistoryRecord(
                 rs.getString("source"),
-                UUID.fromString(rs.getString("imported_player_record_id")),
+                rs.getString("source_player_id"),
+                rs.getString("season_label"),
+                rs.getString("source_club_name"),
+            rs.getString("source_team_name"),
+            rs.getString("jersey_number"),
+            (Integer) rs.getObject("games_played"),
+            (Integer) rs.getObject("goals"),
+            (Integer) rs.getObject("assists"),
+            (Integer) rs.getObject("points"),
+            (Integer) rs.getObject("penalties"),
+            (Double) rs.getObject("pim")), args.toArray());
+    }
+
+    public List<String> findCareerAvailableSeasons(PlayerContext context) {
+        return findCareerHistory(context, null).stream()
+                .map(CareerHistoryRecord::seasonLabel)
+                .distinct()
+                .toList();
+    }
+
+    public List<PlayerIdentityLink> findPersistedIdentityLinks(Long userId) {
+        String sql = """
+                SELECT source, source_player_id, link_state, last_verified_at
+                FROM player_identity_map
+                WHERE user_id = ?
+                ORDER BY source, last_verified_at DESC NULLS LAST
+                """;
+        return jdbcTemplate.query(sql, (rs, rowNum) -> new PlayerIdentityLink(
+                rs.getString("source"),
+                rs.getString("source_player_id"),
                 rs.getString("link_state"),
                 toOffsetDateTime(rs.getTimestamp("last_verified_at"))), userId);
     }
 
-    public ImportedPlayerRecord findImportedRecord(UUID importedPlayerRecordId) {
-        String sql = """
-                SELECT id, source, player_name_raw, player_name_normalized, birth_month, birth_year,
-                       season_label, source_team_id, COALESCE(source_team_name, source_team_id) AS source_team_name,
-                       source_club_id, COALESCE(source_club_name, source) AS source_club_name
-                FROM integration_imported_player_record
-                WHERE id = ?
-                """;
-        return jdbcTemplate.queryForObject(sql, importedPlayerRecordRowMapper(), importedPlayerRecordId);
-    }
-
-    public List<ImportedPlayerRecord> findEquivalentRecords(ImportedPlayerRecord selectedRecord) {
-        String sql = """
-                SELECT id, source, player_name_raw, player_name_normalized, birth_month, birth_year,
-                       season_label, source_team_id, COALESCE(source_team_name, source_team_id) AS source_team_name,
-                       source_club_id, COALESCE(source_club_name, source) AS source_club_name
-                FROM integration_imported_player_record
-                WHERE source = ?
-                  AND player_name_normalized = ?
-                  AND birth_year = ?
-                  AND birth_month = ?
-                ORDER BY season_label DESC, source_team_name
-                """;
-        return jdbcTemplate.query(
-                sql,
-                importedPlayerRecordRowMapper(),
-                selectedRecord.source(),
-                selectedRecord.playerNameNormalized(),
-                selectedRecord.birthYear(),
-                selectedRecord.birthMonth());
-    }
-
-    public int replaceConfirmedLinks(Long userId, List<UUID> selectedRecordIds) {
+    public int replaceConfirmedIdentityLinks(Long userId, List<ConfirmedIdentitySelection> selections) {
         int insertedCount = 0;
         Set<String> processedSources = new LinkedHashSet<>();
 
-        for (UUID selectedRecordId : selectedRecordIds) {
-            ImportedPlayerRecord selectedRecord = findImportedRecord(selectedRecordId);
-            if (!processedSources.add(selectedRecord.source())) {
+        for (ConfirmedIdentitySelection selection : selections) {
+            if (selection.source() == null || selection.source().isBlank()
+                    || selection.sourcePlayerId() == null || selection.sourcePlayerId().isBlank()) {
                 continue;
             }
 
-            jdbcTemplate.update("DELETE FROM integration_match_link WHERE user_id = ? AND source = ?", userId, selectedRecord.source());
-
-            for (ImportedPlayerRecord equivalentRecord : findEquivalentRecords(selectedRecord)) {
-                insertedCount += jdbcTemplate.update(
-                        """
-                        INSERT INTO integration_match_link (
-                            id, user_id, source, imported_player_record_id, link_state,
-                            match_method, confidence_score, confirmed_at, last_verified_at, identity_fingerprint
-                        )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), ?)
-                        """,
-                        UUID.randomUUID(),
-                        userId,
-                        equivalentRecord.source(),
-                        equivalentRecord.id(),
-                        "CONFIRMED",
-                        "EXACT_NORMALIZED",
-                        1.0,
-                        equivalentRecord.playerNameNormalized() + "|" + equivalentRecord.birthYear() + "-" + equivalentRecord.birthMonth());
+            String source = selection.source().trim().toUpperCase();
+            if (!processedSources.add(source)) {
+                continue;
             }
+
+            jdbcTemplate.update("DELETE FROM player_identity_map WHERE user_id = ? AND source = ?", userId, source);
+
+            insertedCount += jdbcTemplate.update(
+                    """
+                    INSERT INTO player_identity_map (
+                        id, user_id, source, source_player_id, link_state,
+                        match_method, confidence_score, confirmed_at, last_verified_at,
+                        created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), NOW(), NOW())
+                    """,
+                    UUID.randomUUID(),
+                    userId,
+                    source,
+                    selection.sourcePlayerId(),
+                    "CONFIRMED",
+                    "USER_SELECTION",
+                    1.0);
         }
 
         return insertedCount;
     }
 
-    public List<String> findAvailableSeasons(PlayerContext context) {
-        List<ImportedPlayerRecord> bestMatches = findBestMatches(context, null);
-        return bestMatches.stream().map(ImportedPlayerRecord::seasonLabel).distinct().toList();
+    public List<CareerCandidateRecord> findCareerCandidates(PlayerContext context) {
+        String normalizedExpr = """
+                TRIM(REGEXP_REPLACE(
+                    LOWER(REGEXP_REPLACE(COALESCE(player_name, ''), '[^a-zA-Z0-9 ]', ' ', 'g')),
+                    '\\s+',
+                    ' ',
+                    'g'
+                ))
+                """;
+
+        String sql = """
+                SELECT DISTINCT ON (source, source_player_id)
+                    source,
+                    source_player_id,
+                    COALESCE(player_name, '') AS player_name,
+                    season_label
+                FROM (
+                    SELECT
+                        'AYHL' AS source,
+                        source_player_id,
+                        player_name,
+                        season_label,
+                        %s AS normalized_name
+                    FROM ayhl_player_career
+
+                    UNION ALL
+
+                    SELECT
+                        'THF' AS source,
+                        source_player_id,
+                        player_name,
+                        season_label,
+                        %s AS normalized_name
+                    FROM thf_player_career
+
+                    UNION ALL
+
+                    SELECT
+                        'AHF' AS source,
+                        source_player_id,
+                        player_name,
+                        season_label,
+                        %s AS normalized_name
+                    FROM ahf_player_career
+                ) careers
+                WHERE %%s
+                ORDER BY source, source_player_id, season_label DESC
+                """.formatted(normalizedExpr, normalizedExpr, normalizedExpr);
+
+        NameMatchClause nameMatchClause = buildNameMatchClause(context.normalizedName());
+        sql = sql.formatted(nameMatchClause.sql());
+
+        return jdbcTemplate.query(sql, (rs, rowNum) -> new CareerCandidateRecord(
+                rs.getString("source"),
+                rs.getString("source_player_id"),
+                rs.getString("player_name"),
+                rs.getString("season_label")), nameMatchClause.args().toArray());
+    }
+
+    private NameMatchClause buildNameMatchClause(String normalizedName) {
+        List<String> tokens = Arrays.stream((normalizedName == null ? "" : normalizedName).trim().split("\\s+"))
+                .map(String::trim)
+                .filter(token -> !token.isBlank())
+                .distinct()
+                .toList();
+
+        if (tokens.isEmpty()) {
+            return new NameMatchClause("normalized_name = ''", List.of());
+        }
+
+        StringBuilder sql = new StringBuilder();
+        List<Object> args = new ArrayList<>();
+        for (String token : tokens) {
+            if (!sql.isEmpty()) {
+                sql.append(" AND ");
+            }
+            sql.append("normalized_name ~ ?");
+            args.add("(^| )" + token + "( |$)");
+        }
+        return new NameMatchClause(sql.toString(), args);
+    }
+
+    public List<CareerHistoryRecord> findCareerHistoryByIdentityLinks(List<PlayerIdentityLink> identityLinks, String seasonLabel) {
+        if (identityLinks == null || identityLinks.isEmpty()) {
+            return List.of();
+        }
+
+        StringBuilder where = new StringBuilder();
+        List<Object> args = new ArrayList<>();
+        for (PlayerIdentityLink link : identityLinks) {
+            if (link.source() == null || link.source().isBlank() || link.sourcePlayerId() == null || link.sourcePlayerId().isBlank()) {
+                continue;
+            }
+            if (!where.isEmpty()) {
+                where.append(" OR ");
+            }
+            where.append("(source = ? AND source_player_id = ?)");
+            args.add(link.source().trim().toUpperCase());
+            args.add(link.sourcePlayerId());
+        }
+        if (where.isEmpty()) {
+            return List.of();
+        }
+
+        String sql = """
+                SELECT source, source_player_id, season_label, source_club_name, source_team_name,
+                       jersey_number, games_played, goals, assists, points, penalties, pim
+                FROM (
+                    SELECT
+                        'AYHL' AS source,
+                        source_player_id,
+                        season_label,
+                        COALESCE(league_name, 'AYHL') AS source_club_name,
+                        COALESCE(team_name, 'Unknown Team') AS source_team_name,
+                        jersey_number,
+                        games_played,
+                        goals,
+                        assists,
+                        points,
+                        penalties,
+                        CAST(pim AS DOUBLE PRECISION) AS pim
+                    FROM ayhl_player_career
+
+                    UNION ALL
+
+                    SELECT
+                        'THF' AS source,
+                        source_player_id,
+                        season_label,
+                        COALESCE(league_name, 'THF') AS source_club_name,
+                        COALESCE(team_name, 'Unknown Team') AS source_team_name,
+                        jersey_number,
+                        games_played,
+                        goals,
+                        assists,
+                        points,
+                        penalties,
+                        CAST(pim AS DOUBLE PRECISION) AS pim
+                    FROM thf_player_career
+
+                    UNION ALL
+
+                    SELECT
+                        'AHF' AS source,
+                        source_player_id,
+                        season_label,
+                        COALESCE(league_name, 'AHF') AS source_club_name,
+                        COALESCE(team_name, 'Unknown Team') AS source_team_name,
+                        jersey_number,
+                        games_played,
+                        goals,
+                        assists,
+                        points,
+                        penalties,
+                        CAST(pim AS DOUBLE PRECISION) AS pim
+                    FROM ahf_player_career
+                ) careers
+                WHERE
+                """ + where;
+
+        if (seasonLabel != null && !seasonLabel.isBlank()) {
+            sql += " AND season_label = ?";
+            args.add(seasonLabel);
+        }
+        sql += " ORDER BY season_label DESC, source, source_team_name";
+
+        return jdbcTemplate.query(sql, (rs, rowNum) -> new CareerHistoryRecord(
+                rs.getString("source"),
+                rs.getString("source_player_id"),
+                rs.getString("season_label"),
+                rs.getString("source_club_name"),
+            rs.getString("source_team_name"),
+            rs.getString("jersey_number"),
+            (Integer) rs.getObject("games_played"),
+            (Integer) rs.getObject("goals"),
+            (Integer) rs.getObject("assists"),
+            (Integer) rs.getObject("points"),
+            (Integer) rs.getObject("penalties"),
+            (Double) rs.getObject("pim")), args.toArray());
+    }
+
+    public List<String> findCareerAvailableSeasonsByIdentityLinks(List<PlayerIdentityLink> identityLinks) {
+        return findCareerHistoryByIdentityLinks(identityLinks, null).stream()
+                .map(CareerHistoryRecord::seasonLabel)
+                .distinct()
+                .toList();
     }
 
     public Optional<ImportRunRow> findImportRun(UUID runId) {
@@ -229,27 +416,22 @@ public class IntegrationDataService {
         return results.stream().findFirst();
     }
 
-    public int countImportedPlayersBySource(String source) {
-        Integer count = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM integration_imported_player_record WHERE source = ?",
-                Integer.class,
-                source);
-        return count == null ? 0 : count;
-    }
+    public int countTrackedPlayersBySource(String source) {
+        String normalizedSource = source == null ? "" : source.trim().toUpperCase();
 
-    private RowMapper<ImportedPlayerRecord> importedPlayerRecordRowMapper() {
-        return (rs, rowNum) -> new ImportedPlayerRecord(
-                UUID.fromString(rs.getString("id")),
-                rs.getString("source"),
-                rs.getString("player_name_raw"),
-                rs.getString("player_name_normalized"),
-                rs.getInt("birth_month"),
-                rs.getInt("birth_year"),
-                rs.getString("season_label"),
-                rs.getString("source_team_id"),
-                rs.getString("source_team_name"),
-                rs.getString("source_club_id"),
-                rs.getString("source_club_name"));
+        String sql = switch (normalizedSource) {
+            case "AYHL" -> "SELECT COUNT(DISTINCT source_player_id) FROM ayhl_player_career";
+            case "THF" -> "SELECT COUNT(DISTINCT source_player_id) FROM thf_player_career";
+            case "AHF" -> "SELECT COUNT(DISTINCT source_player_id) FROM ahf_player_career";
+            default -> null;
+        };
+
+        if (sql == null) {
+            return 0;
+        }
+
+        Integer count = jdbcTemplate.queryForObject(sql, Integer.class);
+        return count == null ? 0 : count;
     }
 
     private RowMapper<ImportRunRow> importRunRowMapper() {
@@ -276,21 +458,13 @@ public class IntegrationDataService {
     public record PlayerContext(Long userId, String displayName, String normalizedName, int birthYear, int birthMonth) {
     }
 
-    public record ImportedPlayerRecord(
-            UUID id,
-            String source,
-            String playerNameRaw,
-            String playerNameNormalized,
-            int birthMonth,
-            int birthYear,
-            String seasonLabel,
-            String sourceTeamId,
-            String sourceTeamName,
-            String sourceClubId,
-            String sourceClubName) {
+    public record PlayerIdentityLink(String source, String sourcePlayerId, String linkState, OffsetDateTime lastVerifiedAt) {
     }
 
-    public record MatchLinkRow(String source, UUID importedPlayerRecordId, String linkState, OffsetDateTime lastVerifiedAt) {
+    public record ConfirmedIdentitySelection(String source, String sourcePlayerId) {
+    }
+
+    public record CareerCandidateRecord(String source, String sourcePlayerId, String playerName, String seasonLabel) {
     }
 
     public record ImportRunRow(
@@ -304,5 +478,23 @@ public class IntegrationDataService {
             int rejected,
             int duplicateSkipped,
             String errorSummary) {
+    }
+
+    public record CareerHistoryRecord(
+            String source,
+            String sourcePlayerId,
+            String seasonLabel,
+            String sourceClubName,
+            String sourceTeamName,
+            String jerseyNumber,
+            Integer gamesPlayed,
+            Integer goals,
+            Integer assists,
+            Integer points,
+            Integer penalties,
+            Double pim) {
+    }
+
+    private record NameMatchClause(String sql, List<Object> args) {
     }
 }

@@ -44,6 +44,46 @@ public class IntegrationAccessGuard {
         return hasRole("ADMIN") || hasRole("OPERATOR");
     }
 
+    /**
+     * Check if user can view a player's seasons data.
+     * Authorization: User is the player themselves, OR user is a linked parent.
+     * 
+     * @param userId current authenticated user ID (as String UUID)
+     * @param playerId player ID to check (as String UUID)
+     * @return true if user is authorized to view the player's seasons
+     */
+    public boolean canViewSeasons(String userId, String playerId) {
+        if (userId == null || playerId == null) {
+            return false;
+        }
+        
+        // Case 1: Player viewing their own data
+        if (userId.equals(playerId)) {
+            return true;
+        }
+        
+        // Case 2: Parent viewing linked child's data (via AccountLink)
+        // Note: AccountLink checking requires repository injection
+        // For now, check via method that should be implemented in AccountLinkService
+        return canAccessLinkedChild(userId, playerId);
+    }
+    
+    /**
+     * Check if user (parent) can access child player data via account link.
+     * This method delegates to AccountLinkService which queries the AccountLink table.
+     * 
+     * @param parentUserIdString parent user ID
+     * @param childPlayerIdString child player ID  
+     * @return true if account link exists and parent is linked to child
+     */
+    private boolean canAccessLinkedChild(String parentUserIdString, String childPlayerIdString) {
+        // This will be properly implemented when AccountLinkService/Repository is available
+        // For now, return false - to be fully implemented in integration with account linking system
+        // TODO: Inject AccountLinkRepository and check:
+        // return accountLinkRepository.findByParentIdAndChildId(parentUserIdString, childPlayerIdString).isPresent();
+        return false;
+    }
+
     public boolean hasRole(String role) {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication == null) {

@@ -20,12 +20,12 @@ public class DailyImportScheduler {
         ImportRunService.ImportRunSnapshot snapshot = importRunService.startManualRun(List.of(
                 IntegrationSource.THF,
                 IntegrationSource.AYHL,
-                IntegrationSource.GAMESHEET));
+            IntegrationSource.AHF));
 
         List<ImportRunService.SourceSummary> summaries = List.of(
                 new ImportRunService.SourceSummary("THF", 0, 0, 0, 0, ImportRunStatus.COMPLETED.name(), null),
                 new ImportRunService.SourceSummary("AYHL", 0, 0, 0, 0, ImportRunStatus.COMPLETED.name(), null),
-                new ImportRunService.SourceSummary("GAMESHEET", 0, 0, 0, 0, ImportRunStatus.COMPLETED.name(), null));
+            new ImportRunService.SourceSummary("AHF", 0, 0, 0, 0, ImportRunStatus.COMPLETED.name(), null));
 
         importRunService.updateRun(snapshot.runId(), ImportRunStatus.COMPLETED, summaries);
     }

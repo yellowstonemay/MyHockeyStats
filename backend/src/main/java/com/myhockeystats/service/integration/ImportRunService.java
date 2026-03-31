@@ -76,7 +76,7 @@ public class ImportRunService {
         Map<String, DailySourceStatus> latest = new LinkedHashMap<>();
         for (IntegrationSource source : IntegrationSource.values()) {
             var latestRun = integrationDataService.findLatestImportRunBySource(source.name());
-            int importedPlayers = integrationDataService.countImportedPlayersBySource(source.name());
+            int trackedPlayers = integrationDataService.countTrackedPlayersBySource(source.name());
             if (latestRun.isPresent()) {
                 var run = latestRun.get();
                 latest.put(source.name(), new DailySourceStatus(
@@ -88,9 +88,9 @@ public class ImportRunService {
                         run.accepted(),
                         run.rejected(),
                         run.duplicateSkipped(),
-                        importedPlayers));
+                        trackedPlayers));
             } else {
-                latest.put(source.name(), new DailySourceStatus(source.name(), null, "NOT_RUN", null, 0, 0, 0, 0, importedPlayers));
+                latest.put(source.name(), new DailySourceStatus(source.name(), null, "NOT_RUN", null, 0, 0, 0, 0, trackedPlayers));
             }
         }
         return new DailyLatestSnapshot("daily", new ArrayList<>(latest.values()));
@@ -123,7 +123,7 @@ public class ImportRunService {
             int accepted,
             int rejected,
             int duplicateSkipped,
-            int importedPlayers) {
+            int trackedPlayers) {
     }
 
     public record DailyLatestSnapshot(String schedule, List<DailySourceStatus> latestBySource) {
