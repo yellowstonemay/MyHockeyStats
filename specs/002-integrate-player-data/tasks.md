@@ -242,7 +242,7 @@ Ensure comprehensive testing coverage, remove all deprecated code/components, an
 
 ---
 
-- [ ] T022 Add comprehensive end-to-end test in backend/src/test/java/com/myhockeystats/e2e/SeasonsE2ETest.java:
+- [x] T022 Add comprehensive end-to-end test in backend/src/test/java/com/myhockeystats/e2e/SeasonsE2ETest.java:
   - Load career data into all three tables (AYHL, THF, AHF)
   - Create player with matching name
   - Sign in as player
@@ -252,41 +252,41 @@ Ensure comprehensive testing coverage, remove all deprecated code/components, an
   - Verify parent access works
   - Use Testcontainers
 
-- [ ] T023 [P] Remove deprecated IntegrationPlayerController methods in backend/src/main/java/com/myhockeystats/api/IntegrationPlayerController.java:
+- [x] T023 [P] Remove deprecated IntegrationPlayerController methods in backend/src/main/java/com/myhockeystats/api/IntegrationPlayerController.java:
   - Remove /api/integrations/me/match-status endpoint
   - Remove /api/integrations/me/matches/confirm endpoint
   - Remove any candidate matching/confirmation logic
   - Keep only remaining integration endpoints (if any)
 
-- [ ] T024 [P] Remove deprecated MatchConfirmation/MatchCandidateSelector components in frontend/web/src/components/:
+- [x] T024 [P] Remove deprecated MatchConfirmation/MatchCandidateSelector components in frontend/web/src/components/:
   - Remove frontend/web/src/components/MatchConfirmation/ directory entirely
   - Remove frontend/web/src/components/MatchCandidateSelector/ directory entirely
   - Verify no other components import these removed components
 
-- [ ] T025 [P] Remove integrated-history page in frontend/web/src/pages/:
+- [x] T025 [P] Remove integrated-history page in frontend/web/src/pages/:
   - Remove frontend/web/src/pages/IntegratedHistoryPage.jsx (or similar)
   - Remove route definition for /integrated-history from frontend/web/src/App.jsx or router config
   - Verify no navigation links point to /integrated-history
 
-- [ ] T026 Clean up old identity_map related code in backend:
+- [x] T026 Clean up old identity_map related code in backend:
   - Search for all references to PlayerIdentityMap or similar class in backend/src/
   - Remove PlayerIdentityMap entity if exists: backend/src/main/java/com/myhockeystats/model/PlayerIdentityMap.java
   - Remove PlayerIdentityMapRepository: backend/src/main/java/com/myhockeystats/repository/PlayerIdentityMapRepository.java
   - Remove PlayerIdentityMapService: backend/src/main/java/com/myhockeystats/service/PlayerIdentityMapService.java
   - Remove related tests
 
-- [ ] T027 Add database cleanup/deprecation documentation in specs/002-integrate-player-data/:
+- [x] T027 Add database cleanup/deprecation documentation in specs/002-integrate-player-data/:
   - Create DATABASE_CLEANUP.md documenting steps to drop player_identity_map table in production
   - Include backup script before drop
   - Include rollback procedure
   - Include verification query to confirm drop was successful
 
-- [ ] T028 [P] Update frontend/web/src/pages/PlayerProfile.jsx navigation:
+- [x] T028 [P] Update frontend/web/src/pages/Profile.jsx navigation:
   - Verify Seasons tab appears in main navigation after Profile Settings
   - Remove any old "Integrated History" tab references
   - Test tab navigation between Profile Settings, Account Linking, Seasons, etc.
 
-- [ ] T029 Run full regression test suite:
+- [x] T029 Run full regression test suite:
   - Execute backend: `mvn clean test` and verify all tests pass
   - Execute frontend: `npm run test` and verify all Jest tests pass
   - Check test coverage reports (target > 80%)
@@ -309,23 +309,23 @@ Build and deploy application with new feature, then validate correctness in stag
 
 ---
 
-- [ ] T030 Update Docker build in backend/Dockerfile:
+- [x] T030 Update Docker build in backend/Dockerfile:
   - Ensure Dockerfile builds successfully with all new Java files
   - Run `docker build -t myhoceystats-backend:latest backend/` and verify build succeeds
   - Verify JAR includes all new CareerLookupService, SeasonsController classes
 
-- [ ] T031 Update Docker build in frontend/web/Dockerfile:
+- [x] T031 Update Docker build in frontend/web/Dockerfile:
   - Ensure Dockerfile builds React app with new SeasonsTab component
   - Run `docker build -t myhockeystats-frontend:latest frontend/web/` and verify build succeeds
   - Verify output includes new SeasonsTab.jsx compiled
 
-- [ ] T032 [P] Update docker-compose.yml:
+- [x] T032 [P] Update docker-compose.yml:
   - Verify docker-compose.yml includes both backend and frontend services
   - Add environment variables for database connection if needed
   - Run `docker-compose up` and verify both services start without errors
   - Access frontend at http://localhost and verify Seasons tab is visible
 
-- [ ] T033 Validate Seasons endpoint in staging/preview:
+- [x] T033 Validate Seasons endpoint in staging/preview:
   - Sign in as player
   - Navigate to Seasons tab
   - Verify career records display from all available sources
@@ -333,26 +333,26 @@ Build and deploy application with new feature, then validate correctness in stag
   - Verify no errors in browser console
   - Verify response times are < 1 second (p95)
 
-- [ ] T034 [P] Update API documentation in backend/README.md or docs/:
+- [x] T034 [P] Update API documentation in backend/README.md or docs/:
   - Add REST API endpoint documentation for GET /api/players/{playerId}/seasons
   - Include request/response examples
   - Include authorization requirements
   - Include HTTP cache behavior (5-minute TTL)
   - Include error codes (401, 404, 500)
 
-- [ ] T035 [P] Update frontend documentation in frontend/web/README.md:
+- [x] T035 [P] Update frontend documentation in frontend/web/README.md:
   - Document new SeasonsTab component (props, usage)
   - Document API client function fetchPlayerSeasons(playerId, accessToken)
   - Document expected API response format
   - Include examples of rendering career data
 
-- [ ] T036 Performance validation:
+- [x] T036 Performance validation:
   - Measure Seasons endpoint response time with 100 career records (target < 1 second p95)
   - Verify HTTP cache is working (second load should hit browser cache)
   - Monitor database query time (target < 500ms)
   - Check for N+1 query problems
 
-- [ ] T037 Smoke test full feature flow:
+- [x] T037 Smoke test full feature flow:
   - Create test player account
   - Seed career data in AYHL, THF, AHF tables for test player name
   - Sign in as player
