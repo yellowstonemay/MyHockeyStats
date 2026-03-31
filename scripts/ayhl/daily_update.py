@@ -2,7 +2,7 @@
 
 Runs every day during the active season to:
   1. Pull current-season player IDs from the database
-     (integration_imported_player_record, season_label = current season).
+    (ayhl_roster primary source, ayhl_player_career fallback).
   2. If any player has no career skeleton yet, run reconcile_rosters_to_career_json.py
      so every player has at least an empty stub before scraping.
   3. Run scrape_player_careers.py for all current-season players to fetch
@@ -173,20 +173,43 @@ def ensure_tables(conn) -> None:
 
 
 def fetch_current_season_players(conn, label: str) -> list[dict]:
+    """Return current-season players from AYHL tables.
+
+    Primary source is ayhl_roster; ayhl_player_career is used as a fallback so
+    daily sync can continue if roster rows are delayed but career rows exist.
+    """
     with conn.cursor() as cur:
         cur.execute(
             """
             SELECT DISTINCT
-                player_id,
-                player_name_raw,
+                source_player_id,
+                player_name,
                 birth_month,
                 birth_year
-            FROM ayhl_roster
-            WHERE season_label = %s
-              AND player_id IS NOT NULL
-            ORDER BY player_id
+            FROM (
+                SELECT
+                    r.player_id AS source_player_id,
+                    r.player_name_raw AS player_name,
+                    r.birth_month,
+                    r.birth_year
+                FROM ayhl_roster r
+                WHERE r.season_label = %s
+                  AND r.player_id IS NOT NULL
+
+                UNION
+
+                SELECT
+                    c.source_player_id,
+                    c.player_name,
+                    NULL::INTEGER AS birth_month,
+                    NULL::INTEGER AS birth_year
+                FROM ayhl_player_career c
+                WHERE c.season_label = %s
+                  AND c.source_player_id IS NOT NULL
+            ) players
+            ORDER BY source_player_id
             """,
-            (label,),
+            (label, label),
         )
         rows = cur.fetchall()
     return [
@@ -382,10 +405,13 @@ def main() -> int:
         # ---------------------------------------------------------------- #
         # Step 1: Get current-season players from DB                        #
         # ---------------------------------------------------------------- #
-        print(f"\nStep 1: Fetching current-season players for '{label}' from ayhl_roster...")
+        print(
+            f"\nStep 1: Fetching current-season players for '{label}' "
+            "from ayhl_roster/ayhl_player_career..."
+        )
         players = fetch_current_season_players(conn, label)
         if not players:
-            print(f"  No players found for '{label}' in ayhl_roster.")
+            print(f"  No players found for '{label}' in ayhl_roster or ayhl_player_career.")
             print("  Run weekly_update.py first to load current-season rosters.")
             return 0
         print(f"  Found {len(players)} players.")

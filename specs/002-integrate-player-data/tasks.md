@@ -148,7 +148,7 @@ Create new Seasons tab component, integrate with new API endpoint, and remove ol
 
 ---
 
-- [ ] T014 [P] [US1] Create SeasonsTab component in frontend/web/src/components/PlayerProfile/SeasonsTab.jsx:
+- [x] T014 [P] [US1] Create SeasonsTab component in frontend/web/src/components/PlayerProfile/SeasonsTab.jsx:
   - Display list of career records from API response
   - Show source attribution (AYHL, THF, AHF) for each record
   - Show all statistics: season, club, team, jerseyNumber, gamesPlayed, goals, assists, points, penalties, pim
@@ -158,7 +158,7 @@ Create new Seasons tab component, integrate with new API endpoint, and remove ol
   - Show ambiguity note if hasAmbiguity flag is true
   - Sort records by season DESC (newest first)
 
-- [ ] T015 [P] [US1] Extend API client in frontend/web/src/lib/api.js:
+- [x] T015 [P] [US1] Extend API client in frontend/web/src/lib/integrationsApi.js:
   - Add fetchPlayerSeasons(playerId, accessToken) function
   - Call GET /api/players/{playerId}/seasons with Bearer token
   - Handle HTTP 401 Unauthorized (redirect to login)
@@ -166,14 +166,14 @@ Create new Seasons tab component, integrate with new API endpoint, and remove ol
   - Handle HTTP 500 or timeout (return error state for UI)
   - Include error handling with user-friendly messages
 
-- [ ] T016 [US1] Integrate SeasonsTab into PlayerProfile component in frontend/web/src/pages/PlayerProfile.jsx:
+- [x] T016 [US1] Integrate SeasonsTab into PlayerProfile component in frontend/web/src/pages/Profile.jsx:
   - Add SeasonsTab to tab navigation (alongside Profile Settings, Account Linking, etc.)
   - Pass playerId to SeasonsTab component
   - Call fetchPlayerSeasons() on tab activation
   - Display loading/error/success states from API response
   - Maintain existing tab functionality for other tabs
 
-- [ ] T017 [US1] Add Jest unit tests in frontend/web/src/components/PlayerProfile/SeasonsTab.test.jsx:
+- [x] T017 [US1] Add Jest unit tests in frontend/web/src/components/PlayerProfile/SeasonsTab.test.jsx:
   - Test component renders career records from props
   - Test loading state displays spinner
   - Test error state displays retry button
@@ -182,7 +182,7 @@ Create new Seasons tab component, integrate with new API endpoint, and remove ol
   - Test source attribution displays correctly
   - Coverage target: > 80%
 
-- [ ] T018 [US1] Add React Integration tests in frontend/web/src/pages/PlayerProfile.integration.test.jsx:
+- [x] T018 [US1] Add React Integration tests in frontend/web/src/pages/Profile.integration.test.jsx:
   - Test SeasonsTab tab is clickable and loads data
   - Test fetchPlayerSeasons() is called with correct playerId
   - Test career records display after successful API call

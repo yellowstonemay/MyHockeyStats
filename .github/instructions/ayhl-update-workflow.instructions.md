@@ -30,7 +30,7 @@ season_label = f"{season_year}-{season_year + 1} Season"
 ## Weekly Update (run once per week, e.g. every Sunday)
 
 Refreshes the team list and player rosters for the current season and loads
-them into the `integration_imported_player_record` table.
+them into the `ayhl_roster` table.
 
 ### Steps
 
@@ -214,8 +214,8 @@ Flyway migration: `V20260327_01__ayhl_career_change_tables.sql`
 - Only the **current season** is scraped/synced during daily updates to avoid
   unnecessary re-scraping of historical seasons.
 - The weekly update must run before the daily update for a new season, because
-  `daily_update.py` reads `integration_imported_player_record` to build its
-  player list.
+   `daily_update.py` reads `ayhl_roster` (with `ayhl_player_career` fallback)
+   to build its player list.
 - `SEASON_TO_ID` mapping lives in `discover_teams.py`. When a new season
   becomes available, add `<year>: <id>` to the top of the dict.
 

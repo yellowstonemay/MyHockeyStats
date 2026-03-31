@@ -7,14 +7,31 @@ import IntegrationStatusBanner from '../components/integrations/IntegrationStatu
 export default function IntegrationHistoryPage() {
   const [statusData, setStatusData] = useState(null)
   const [history, setHistory] = useState(null)
-  const [selectedCandidateId, setSelectedCandidateId] = useState(null)
+  const [selectedBySource, setSelectedBySource] = useState({})
   const [selectedSeason, setSelectedSeason] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
-  const selectedCandidate = useMemo(() => {
-    return statusData?.candidates?.find((candidate) => candidate.candidateId === selectedCandidateId)
-  }, [statusData, selectedCandidateId])
+  const candidatesBySource = useMemo(() => {
+    const grouped = {}
+    for (const candidate of statusData?.candidates || []) {
+      if (!grouped[candidate.source]) {
+        grouped[candidate.source] = []
+      }
+      grouped[candidate.source].push(candidate)
+    }
+    return grouped
+  }, [statusData])
+
+  const missingSelectionSources = useMemo(() => {
+    const missing = []
+    for (const [source, candidates] of Object.entries(candidatesBySource)) {
+      if (candidates.length > 1 && !selectedBySource[source]) {
+        missing.push(source)
+      }
+    }
+    return missing
+  }, [candidatesBySource, selectedBySource])
 
   useEffect(() => {
     const load = async () => {
@@ -23,6 +40,19 @@ export default function IntegrationHistoryPage() {
       try {
         const status = await integrationsApi.getMatchStatus()
         setStatusData(status)
+        if (status.status === 'AMBIGUOUS_SELECTION_REQUIRED') {
+          const defaults = {}
+          for (const candidate of status.candidates || []) {
+            const source = candidate.source
+            if (!source) {
+              continue
+            }
+            if (!(source in defaults)) {
+              defaults[source] = candidate.candidateId
+            }
+          }
+          setSelectedBySource(defaults)
+        }
 
         if (status.status === 'LINKED') {
           const historyResponse = await integrationsApi.getHistory()
@@ -54,19 +84,38 @@ export default function IntegrationHistoryPage() {
     }
   }
 
+  const handleSelect = (source, candidateId) => {
+    setSelectedBySource((prev) => ({
+      ...prev,
+      [source]: candidateId,
+    }))
+  }
+
   const handleConfirm = async () => {
-    if (!selectedCandidate) {
-      return
-    }
     setBusy(true)
     setError('')
     try {
-      await integrationsApi.confirmMatches([
-        {
-          source: selectedCandidate.source,
-          candidateId: selectedCandidate.candidateId,
-        },
-      ])
+      const selections = Object.entries(candidatesBySource)
+        .map(([source, candidates]) => {
+          if (!candidates.length) {
+            return null
+          }
+          const candidateId = candidates.length === 1
+            ? candidates[0].candidateId
+            : selectedBySource[source]
+          if (!candidateId) {
+            return null
+          }
+          return { source, candidateId }
+        })
+        .filter(Boolean)
+
+      if (!selections.length) {
+        setError('Please select at least one candidate.')
+        return
+      }
+
+      await integrationsApi.confirmMatches(selections)
       const refreshedStatus = await integrationsApi.getMatchStatus()
       const refreshedHistory = await integrationsApi.getHistory(selectedSeason || undefined)
       setStatusData(refreshedStatus)
@@ -84,7 +133,7 @@ export default function IntegrationHistoryPage() {
       <div className="container py-8 space-y-6">
         <div>
           <h1 className="text-3xl font-bold text-slate-900">Integrated History</h1>
-          <p className="text-slate-600">Linked records from THF, AYHL, and GameSheet.</p>
+          <p className="text-slate-600">Linked records from THF, AYHL, and AHF.</p>
         </div>
 
         {error && (
@@ -96,8 +145,9 @@ export default function IntegrationHistoryPage() {
         {statusData?.status === 'AMBIGUOUS_SELECTION_REQUIRED' && (
           <MatchCandidateSelector
             candidates={statusData.candidates}
-            selectedId={selectedCandidateId}
-            onSelect={setSelectedCandidateId}
+            selectedBySource={selectedBySource}
+            missingSources={missingSelectionSources}
+            onSelect={handleSelect}
             onConfirm={handleConfirm}
             loading={busy}
           />
@@ -133,12 +183,45 @@ export default function IntegrationHistoryPage() {
             <SourceConflictPanel games={history.games || []} />
 
             <div className="rounded-xl border border-slate-200 bg-white p-4">
-              <h3 className="text-lg font-semibold text-slate-900 mb-3">Team History</h3>
-              <ul className="space-y-2 text-slate-700">
-                {(history.teamHistory || []).map((team) => (
-                  <li key={`${team.source}-${team.team}`}>{team.source}: {team.club} - {team.team}</li>
-                ))}
-              </ul>
+              <h3 className="text-lg font-semibold text-slate-900 mb-3">Player Record</h3>
+              {(history.teamHistory || []).length === 0 ? (
+                <p className="text-sm text-slate-600">No matching records were found yet.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm text-slate-700">
+                    <thead>
+                      <tr className="border-b border-slate-200 text-left text-slate-500">
+                        <th className="py-2 pr-4">Source</th>
+                        <th className="py-2 pr-4">Club</th>
+                        <th className="py-2 pr-4">Team</th>
+                        <th className="py-2 pr-4">Jersey</th>
+                        <th className="py-2 pr-4">GP</th>
+                        <th className="py-2 pr-4">G</th>
+                        <th className="py-2 pr-4">A</th>
+                        <th className="py-2 pr-4">P</th>
+                        <th className="py-2 pr-4">Pen</th>
+                        <th className="py-2 pr-4">PIM</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(history.teamHistory || []).map((team) => (
+                        <tr key={`${team.source}-${team.sourcePlayerId}-${team.team}`} className="border-b border-slate-100">
+                          <td className="py-2 pr-4">{team.source}</td>
+                          <td className="py-2 pr-4">{team.club}</td>
+                          <td className="py-2 pr-4">{team.team}</td>
+                          <td className="py-2 pr-4">{team.jerseyNumber || '-'}</td>
+                          <td className="py-2 pr-4">{team.gamesPlayed ?? '-'}</td>
+                          <td className="py-2 pr-4">{team.goals ?? '-'}</td>
+                          <td className="py-2 pr-4">{team.assists ?? '-'}</td>
+                          <td className="py-2 pr-4">{team.points ?? '-'}</td>
+                          <td className="py-2 pr-4">{team.penalties ?? '-'}</td>
+                          <td className="py-2 pr-4">{team.pim ?? '-'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           </div>
         )}

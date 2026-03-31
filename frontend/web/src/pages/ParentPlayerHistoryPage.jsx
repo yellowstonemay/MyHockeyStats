@@ -58,11 +58,44 @@ export default function ParentPlayerHistoryPage() {
           <div className="rounded-xl border border-slate-200 bg-white p-4">
             <h2 className="text-xl font-semibold text-slate-900">Season {history.season}</h2>
             <p className="text-sm text-slate-600">Sources: {(history.sources || []).join(', ')}</p>
-            <ul className="mt-3 list-disc pl-5 text-slate-700">
-              {(history.teamHistory || []).map((team) => (
-                <li key={`${team.source}-${team.team}`}>{team.source}: {team.club} - {team.team}</li>
-              ))}
-            </ul>
+            {(history.teamHistory || []).length === 0 ? (
+              <p className="mt-3 text-sm text-slate-600">No matching records were found yet.</p>
+            ) : (
+              <div className="mt-3 overflow-x-auto">
+                <table className="min-w-full text-sm text-slate-700">
+                  <thead>
+                    <tr className="border-b border-slate-200 text-left text-slate-500">
+                      <th className="py-2 pr-4">Source</th>
+                      <th className="py-2 pr-4">Club</th>
+                      <th className="py-2 pr-4">Team</th>
+                      <th className="py-2 pr-4">Jersey</th>
+                      <th className="py-2 pr-4">GP</th>
+                      <th className="py-2 pr-4">G</th>
+                      <th className="py-2 pr-4">A</th>
+                      <th className="py-2 pr-4">P</th>
+                      <th className="py-2 pr-4">Pen</th>
+                      <th className="py-2 pr-4">PIM</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(history.teamHistory || []).map((team) => (
+                      <tr key={`${team.source}-${team.sourcePlayerId}-${team.team}`} className="border-b border-slate-100">
+                        <td className="py-2 pr-4">{team.source}</td>
+                        <td className="py-2 pr-4">{team.club}</td>
+                        <td className="py-2 pr-4">{team.team}</td>
+                        <td className="py-2 pr-4">{team.jerseyNumber || '-'}</td>
+                        <td className="py-2 pr-4">{team.gamesPlayed ?? '-'}</td>
+                        <td className="py-2 pr-4">{team.goals ?? '-'}</td>
+                        <td className="py-2 pr-4">{team.assists ?? '-'}</td>
+                        <td className="py-2 pr-4">{team.points ?? '-'}</td>
+                        <td className="py-2 pr-4">{team.penalties ?? '-'}</td>
+                        <td className="py-2 pr-4">{team.pim ?? '-'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
       </div>

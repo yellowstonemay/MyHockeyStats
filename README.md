@@ -14,6 +14,15 @@ This directory contains scripts to populate the MyHockeyStats database with test
 - **Season**: 2025-2026
 - **Sample Games**: 10 games with performance statistics
 
+Additional integration test account:
+
+- **Email**: paden.zhou@example.com
+- **Password**: TestPassword123
+- **Player**: Paden Zhou (born 2011-05-01)
+- **Season**: 2025-2026
+
+Note: `seed_data.sql` creates this account/profile only. It does **not** write to `*_player_career` tables.
+
 ## Setup Methods
 
 ### Method 1: SQL Script (Recommended for Production-like Setups)
@@ -183,6 +192,8 @@ docker compose up -d
 3. **Log in** with:
    - Email: ethan.yan@example.com
    - Password: TestPassword123
+   - Or Email: paden.zhou@example.com
+   - Password: TestPassword123
 4. **Open Integrated History**:
    - `http://localhost:5173/integrated-history` (local dev)
    - `http://localhost/integrated-history` (Docker)
@@ -191,6 +202,6 @@ docker compose up -d
 ## Notes
 
 - The SQL script uses `ON CONFLICT ... DO NOTHING` to safely handle re-runs
-- Test passwords are **NOT hashed** in the SQL seed; only use for development!
+- Test passwords are BCrypt-hashed in the SQL seed and configured for development only.
 - For production, integrate bcrypt password hashing before inserting users
 - Sample game stats use a deterministic formula based on game number for reproducibility

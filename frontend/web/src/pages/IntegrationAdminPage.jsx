@@ -12,7 +12,7 @@ export default function IntegrationAdminPage() {
     setLoading(true)
     setError('')
     try {
-      const run = await integrationsApi.runImport(['THF', 'AYHL', 'GAMESHEET'])
+      const run = await integrationsApi.runImport(['THF', 'AYHL', 'AHF'])
       const summary = await integrationsApi.getImportRun(run.runId)
       setRunSummary(summary)
     } catch (err) {
@@ -65,7 +65,7 @@ export default function IntegrationAdminPage() {
               <div key={entry.source} className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700">
                 <div className="font-medium text-slate-900">{entry.source}</div>
                 <div>Status: {entry.status} {entry.endedAt ? `(${entry.endedAt})` : ''}</div>
-                <div>Imported players: {entry.importedPlayers ?? 0}</div>
+                <div>Tracked players: {entry.trackedPlayers ?? 0}</div>
                 <div>
                   Last run counts: processed={entry.processed ?? 0}, accepted={entry.accepted ?? 0},
                   rejected={entry.rejected ?? 0}, duplicates={entry.duplicateSkipped ?? 0}

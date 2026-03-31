@@ -4,14 +4,13 @@ import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
 public final class IntegrationDtos {
     private IntegrationDtos() {
     }
 
     public record MatchCandidateDto(
-            UUID candidateId,
+            String candidateId,
             String source,
             String displayName,
             String seasonLabel,
@@ -22,7 +21,7 @@ public final class IntegrationDtos {
 
     public record MatchLinkDto(
             String source,
-            UUID importedPlayerRecordId,
+            String sourcePlayerId,
             String linkState,
             OffsetDateTime lastVerifiedAt) {
     }
@@ -37,13 +36,24 @@ public final class IntegrationDtos {
     public record ConfirmMatchRequest(List<ConfirmCandidateDto> selectedCandidates) {
     }
 
-    public record ConfirmCandidateDto(String source, UUID candidateId) {
+        public record ConfirmCandidateDto(String source, String candidateId) {
     }
 
     public record ConfirmMatchResponse(String status, int updatedLinks) {
     }
 
-    public record TeamHistoryDto(String source, String club, String team) {
+    public record TeamHistoryDto(
+            String source,
+            String sourcePlayerId,
+            String club,
+            String team,
+            String jerseyNumber,
+            Integer gamesPlayed,
+            Integer goals,
+            Integer assists,
+            Integer points,
+            Integer penalties,
+            Double pim) {
     }
 
     public record GameConflictDto(String field, Map<String, Integer> values) {
@@ -68,5 +78,41 @@ public final class IntegrationDtos {
             List<TeamHistoryDto> teamHistory,
             List<UnifiedGameDto> games,
             List<String> availableSeasons) {
+    }
+
+    // Simplified career lookup DTOs (002-integrate-player-data)
+    // Represents a single player career record from one source (AYHL, THF, AHF)
+    public record SeasonCareerRecordDto(
+            String source,                    // "AYHL", "THF", or "AHF"
+            String sourcePlayerId,            // Original ID from source league
+            String playerName,                // Original player name from source
+            String season,                    // e.g. "2024-2025"
+            String club,                      // Club/association name
+            String team,                      // Team name
+            String jerseyNumber,              // Optional
+            Integer gamesPlayed,
+            Integer goals,
+            Integer assists,
+            Integer points,                   // Computed: goals + assists
+            Integer penalties,
+            Double pim,                       // Penalty in minutes
+            OffsetDateTime importedAt,        // When data was imported
+            boolean isAmbiguousMembership,    // true if multiple players found
+            String ambiguityNote              // Helpful message if ambiguity
+    ) {
+    }
+
+    // Response wrapper for career lookup with metadata
+    public record SeasonsResponseDto(
+            String playerId,                  // UUID of queried player
+            String playerName,                // From player profile
+            List<SeasonCareerRecordDto> records,  // All matching records
+            boolean hasAmbiguity,             // true if multiple players found
+            String ambiguityNote,             // Helpful message if ambiguity
+            java.util.Set<String> availableSources,  // Which sources have data
+            java.util.Set<String> emptySources,     // Which sources have no data
+            OffsetDateTime fetchedAt,         // Timestamp of query
+            String cacheControl               // "private, max-age=300"
+    ) {
     }
 }
