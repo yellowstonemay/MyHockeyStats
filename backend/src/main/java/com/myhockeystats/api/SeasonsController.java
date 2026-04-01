@@ -2,13 +2,16 @@ package com.myhockeystats.api;
 
 import com.myhockeystats.api.dto.integration.IntegrationDtos;
 import com.myhockeystats.model.PlayerProfile;
+import com.myhockeystats.model.User;
+import com.myhockeystats.repository.UserRepository;
+import com.myhockeystats.security.JwtUtil;
 import com.myhockeystats.security.IntegrationAccessGuard;
 import com.myhockeystats.service.PlayerProfileService;
 import com.myhockeystats.service.integration.CareerLookupService;
-import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.CacheControl;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -25,9 +28,10 @@ import java.util.concurrent.TimeUnit;
  * from all sources (AYHL, THF, AHF).
  */
 @RestController
-@RequestMapping("/api/players/{playerId}/seasons")
-@Slf4j
+@RequestMapping("/api/players")
 public class SeasonsController {
+
+    private static final Logger log = LoggerFactory.getLogger(SeasonsController.class);
     
     @Autowired
     private PlayerProfileService playerProfileService;
@@ -37,6 +41,12 @@ public class SeasonsController {
     
     @Autowired
     private IntegrationAccessGuard accessGuard;
+
+    @Autowired
+    private JwtUtil jwtUtil;
+
+    @Autowired
+    private UserRepository userRepository;
     
     /**
      * GET /api/players/{playerId}/seasons
@@ -51,7 +61,7 @@ public class SeasonsController {
      * @param playerId UUID of player whose seasons to retrieve
      * @return 200 OK with SeasonsResponseDto, or 401/404/500 error
      */
-    @GetMapping
+    @GetMapping("/{playerId}/seasons")
     public ResponseEntity<?> getPlayerSeasons(@PathVariable UUID playerId) {
         try {
             // Get current user ID from security context
@@ -128,6 +138,53 @@ public class SeasonsController {
                 .body(new ErrorResponse("INTERNAL_ERROR", 
                     "An unexpected error occurred. Please try again."));
         }
+    }
+
+    @GetMapping("/me/seasons")
+    public ResponseEntity<?> getMySeasons(@RequestHeader(value = "Authorization", required = false) String authHeader) {
+        String email = extractEmailFromAuthHeader(authHeader);
+        if (email == null) {
+            return ResponseEntity.status(401)
+                .body(new ErrorResponse("UNAUTHORIZED", "Authentication required."));
+        }
+
+        Optional<User> userOpt = userRepository.findByEmail(email);
+        if (userOpt.isEmpty()) {
+            return ResponseEntity.status(404)
+                .body(new ErrorResponse("USER_NOT_FOUND", "User not found."));
+        }
+
+        Optional<PlayerProfile> profileOpt = playerProfileService.getProfileByUserId(userOpt.get().getId());
+        if (profileOpt.isEmpty()) {
+            return ResponseEntity.status(404)
+                .body(new ErrorResponse("PLAYER_NOT_FOUND", "Player profile not found."));
+        }
+
+        PlayerProfile player = profileOpt.get();
+        IntegrationDtos.SeasonsResponseDto response = careerLookupService.lookupCareerRecordsByName(player.getFullName());
+        response = new IntegrationDtos.SeasonsResponseDto(
+            String.valueOf(player.getId()),
+            player.getFullName(),
+            response.records(),
+            response.hasAmbiguity(),
+            response.ambiguityNote(),
+            response.availableSources(),
+            response.emptySources(),
+            response.fetchedAt(),
+            response.cacheControl()
+        );
+
+        return ResponseEntity.ok()
+            .cacheControl(CacheControl.maxAge(300, TimeUnit.SECONDS).cachePrivate())
+            .body(response);
+    }
+
+    private String extractEmailFromAuthHeader(String authHeader) {
+        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+            return null;
+        }
+        String token = authHeader.substring("Bearer ".length());
+        return jwtUtil.extractEmail(token);
     }
     
     /**

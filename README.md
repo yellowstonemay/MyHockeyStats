@@ -194,10 +194,10 @@ docker compose up -d
    - Password: TestPassword123
    - Or Email: paden.zhou@example.com
    - Password: TestPassword123
-4. **Open Integrated History**:
-   - `http://localhost:5173/integrated-history` (local dev)
-   - `http://localhost/integrated-history` (Docker)
-5. **Verify data** appears in Dashboard, Seasons, Game History, and Integrated History
+4. **Open Profile > Game History & Stats tab**:
+   - `http://localhost:5173/profile` (local dev)
+   - `http://localhost/profile` (Docker)
+5. **Verify data** appears in Dashboard and the Profile `Game History & Stats` (Seasons) tab
 
 ## Notes
 

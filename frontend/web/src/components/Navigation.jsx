@@ -2,7 +2,7 @@ import React from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../lib/AuthContext'
 import { Button } from './Button'
-import { Trophy, Settings, LogOut, Link2 } from 'lucide-react'
+import { Trophy, Settings, LogOut } from 'lucide-react'
 
 export default function Navigation() {
   const navigate = useNavigate()
@@ -26,13 +26,6 @@ export default function Navigation() {
         {user && (
           <div className="flex items-center space-x-4">
             <span className="text-slate-600">Welcome, {user.email}</span>
-            <button
-              onClick={() => navigate('/integrated-history')}
-              className="flex items-center space-x-2 text-slate-600 hover:text-slate-900 transition-colors"
-            >
-              <Link2 className="w-5 h-5" />
-              <span>Integrated History</span>
-            </button>
             <button 
               onClick={() => navigate('/profile')}
               className="flex items-center space-x-2 text-slate-600 hover:text-slate-900 transition-colors"

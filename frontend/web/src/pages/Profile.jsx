@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../lib/AuthContext'
 import { Button } from '../components/Button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/Card'
@@ -11,8 +11,11 @@ export default function Profile() {
   const BIRTH_MONTH_YEAR_REGEX = /^(0[1-9]|1[0-2])\/\d{4}$/
 
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { user } = useAuth()
-  const [activeTab, setActiveTab] = useState('profile')
+  const [activeTab, setActiveTab] = useState(
+    searchParams.get('tab') === 'seasons' ? 'seasons' : 'profile'
+  )
   const [fullName, setFullName] = useState(user?.fullName || '')
   const [birthMonthYear, setBirthMonthYear] = useState('')
   const [location, setLocation] = useState('')
@@ -42,6 +45,22 @@ export default function Profile() {
     }
   }
 
+  useEffect(() => {
+    const queryTab = searchParams.get('tab')
+    if (queryTab === 'seasons' || queryTab === 'profile') {
+      setActiveTab(queryTab)
+    }
+  }, [searchParams])
+
+  const openTab = (tab) => {
+    setActiveTab(tab)
+    if (tab === 'profile') {
+      setSearchParams({})
+    } else {
+      setSearchParams({ tab })
+    }
+  }
+
   return (
     <div className="min-h-screen bg-slate-50">
       {/* Content */}
@@ -59,7 +78,7 @@ export default function Profile() {
         {/* Tab Navigation */}
         <div className="flex gap-4 mb-6 border-b border-slate-200">
           <button
-            onClick={() => setActiveTab('profile')}
+            onClick={() => openTab('profile')}
             className={`px-4 py-2 font-medium border-b-2 transition-colors ${
               activeTab === 'profile'
                 ? 'border-primary-600 text-primary-600'
@@ -69,7 +88,7 @@ export default function Profile() {
             Profile Settings
           </button>
           <button
-            onClick={() => setActiveTab('seasons')}
+            onClick={() => openTab('seasons')}
             className={`px-4 py-2 font-medium border-b-2 transition-colors ${
               activeTab === 'seasons'
                 ? 'border-primary-600 text-primary-600'
@@ -186,7 +205,7 @@ export default function Profile() {
 
         {/* Seasons Tab */}
         {activeTab === 'seasons' && (
-          <SeasonsTab playerId={user?.id} />
+          <SeasonsTab />
         )}
       </div>
     </div>

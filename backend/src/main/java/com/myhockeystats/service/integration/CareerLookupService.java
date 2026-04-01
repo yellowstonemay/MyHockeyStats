@@ -7,7 +7,8 @@ import com.myhockeystats.model.integration.ThfPlayerCareer;
 import com.myhockeystats.repository.integration.AhfPlayerCareerRepository;
 import com.myhockeystats.repository.integration.AyhlPlayerCareerRepository;
 import com.myhockeystats.repository.integration.ThfPlayerCareerRepository;
-import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -25,8 +26,9 @@ import java.util.stream.Stream;
  * Direct lookup by normalized name (exact match, stateless).
  */
 @Service
-@Slf4j
 public class CareerLookupService {
+
+    private static final Logger log = LoggerFactory.getLogger(CareerLookupService.class);
     
     @Autowired
     private AyhlPlayerCareerRepository ayhlRepo;
@@ -43,7 +45,7 @@ public class CareerLookupService {
      * - Convert to lowercase
      * - Trim whitespace
      * - Remove common punctuation (-, ', .)
-     * - Normalize internal whitespace
+    * - Normalize internal whitespace
      * 
      * Examples:
      * - "Jean-Pierre O'Brien" -> "jeanpierre obrien"
@@ -61,6 +63,33 @@ public class CareerLookupService {
             .replaceAll("['-.]", "")           // Remove common punctuation
             .replaceAll("\\s+", " ");          // Normalize internal whitespace
     }
+
+    private static String canonicalName(String value) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        return value
+            .toLowerCase()
+            .trim()
+            .replaceAll("[\\s,.'-]", "");
+    }
+
+    private static Set<String> buildCanonicalLookupKeys(String playerName) {
+        String normalized = normalizePlayerName(playerName);
+        if (normalized.isBlank()) {
+            return Collections.emptySet();
+        }
+
+        Set<String> keys = new LinkedHashSet<>();
+        keys.add(canonicalName(normalized));
+
+        String[] parts = normalized.split(" ");
+        if (parts.length == 2) {
+            // Also support source format like "Last,First".
+            keys.add(canonicalName(parts[1] + "," + parts[0]));
+        }
+        return keys;
+    }
     
     /**
      * Lookup all career records from all sources by normalized player name.
@@ -70,28 +99,28 @@ public class CareerLookupService {
      * @return response with all matching records and metadata
      */
     public IntegrationDtos.SeasonsResponseDto lookupCareerRecordsByName(String playerName) {
-        String normalized = normalizePlayerName(playerName);
-        
-        if (normalized.isBlank()) {
+        Set<String> canonicalNames = buildCanonicalLookupKeys(playerName);
+
+        if (canonicalNames.isEmpty()) {
             log.warn("Career lookup attempted with empty player name");
             return createEmptyResponse();
         }
-        
-        log.info("Career lookup: player='{}', normalized='{}'", playerName, normalized);
+
+        log.info("Career lookup: player='{}', canonicalKeys={}", playerName, canonicalNames);
         
         // Query all three repositories
-        List<AyhlPlayerCareer> ayhlRecords = ayhlRepo.findByNormalizedName(normalized);
-        List<ThfPlayerCareer> thfRecords = thfRepo.findByNormalizedName(normalized);
-        List<AhfPlayerCareer> ahfRecords = ahfRepo.findByNormalizedName(normalized);
+        List<AyhlPlayerCareer> ayhlRecords = ayhlRepo.findByCanonicalNames(canonicalNames);
+        List<ThfPlayerCareer> thfRecords = thfRepo.findByCanonicalNames(canonicalNames);
+        List<AhfPlayerCareer> ahfRecords = ahfRepo.findByCanonicalNames(canonicalNames);
         
         log.info("Found records: AYHL={}, THF={}, AHF={}", 
             ayhlRecords.size(), thfRecords.size(), ahfRecords.size());
         
         // Convert to unified DTOs
         List<IntegrationDtos.SeasonCareerRecordDto> allRecords = new ArrayList<>();
-        allRecords.addAll(toSeasonDtos(ayhlRecords, "AYHL"));
-        allRecords.addAll(toSeasonDtos(thfRecords, "THF"));
-        allRecords.addAll(toSeasonDtos(ahfRecords, "AHF"));
+        allRecords.addAll(toSeasonDtosFromAyhl(ayhlRecords, "AYHL"));
+        allRecords.addAll(toSeasonDtosFromThf(thfRecords, "THF"));
+        allRecords.addAll(toSeasonDtosFromAhf(ahfRecords, "AHF"));
         
         // Sort by season DESC, then source ASC
         allRecords.sort(Comparator
@@ -132,7 +161,7 @@ public class CareerLookupService {
     /**
      * Convert AYHL entities to unified DTOs with source label.
      */
-    private List<IntegrationDtos.SeasonCareerRecordDto> toSeasonDtos(
+    private List<IntegrationDtos.SeasonCareerRecordDto> toSeasonDtosFromAyhl(
             List<AyhlPlayerCareer> records, String source) {
         return records.stream()
             .map(r -> new IntegrationDtos.SeasonCareerRecordDto(
@@ -159,7 +188,7 @@ public class CareerLookupService {
     /**
      * Convert THF entities to unified DTOs with source label.
      */
-    private List<IntegrationDtos.SeasonCareerRecordDto> toSeasonDtos(
+    private List<IntegrationDtos.SeasonCareerRecordDto> toSeasonDtosFromThf(
             List<ThfPlayerCareer> records, String source) {
         return records.stream()
             .map(r -> new IntegrationDtos.SeasonCareerRecordDto(
@@ -186,7 +215,7 @@ public class CareerLookupService {
     /**
      * Convert AHF entities to unified DTOs with source label.
      */
-    private List<IntegrationDtos.SeasonCareerRecordDto> toSeasonDtos(
+    private List<IntegrationDtos.SeasonCareerRecordDto> toSeasonDtosFromAhf(
             List<AhfPlayerCareer> records, String source) {
         return records.stream()
             .map(r -> new IntegrationDtos.SeasonCareerRecordDto(

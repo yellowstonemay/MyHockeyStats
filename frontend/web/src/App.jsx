@@ -8,7 +8,6 @@ import SignUp from './pages/SignUp'
 import SignIn from './pages/SignIn'
 import Dashboard from './pages/Dashboard'
 import Profile from './pages/Profile'
-import IntegrationHistoryPage from './pages/IntegrationHistoryPage'
 import ParentPlayerHistoryPage from './pages/ParentPlayerHistoryPage'
 import IntegrationAdminPage from './pages/IntegrationAdminPage'
 
@@ -36,14 +35,6 @@ function AppRoutes() {
           element={
             <ProtectedRoute>
               <Profile />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/integrated-history"
-          element={
-            <ProtectedRoute>
-              <IntegrationHistoryPage />
             </ProtectedRoute>
           }
         />

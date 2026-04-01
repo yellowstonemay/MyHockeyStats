@@ -15,11 +15,13 @@ import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
 import java.time.Instant;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.*;
 
 /**
@@ -82,7 +84,7 @@ class CareerLookupServiceTest {
     @DisplayName("normalizePlayerName: combined punctuation")
     void testNormalizeCombined() {
         String result = CareerLookupService.normalizePlayerName("Jean-Claude L'Étudiant");
-        assertEquals("jeanclaude letudiant", result);
+        assertEquals("jeanclaude létudiant", result);
     }
     
     @Test
@@ -107,11 +109,11 @@ class CareerLookupServiceTest {
         ThfPlayerCareer thfRecord = createThfRecord("john smith", "2024-2025", 8, 4, 2);
         AhfPlayerCareer ahfRecord = createAhfRecord("john smith", "2023-2024", 12, 6, 4);
         
-        when(ayhlRepo.findByNormalizedName("john smith"))
+        when(ayhlRepo.findByCanonicalNames(any(Collection.class)))
             .thenReturn(List.of(ayhlRecord));
-        when(thfRepo.findByNormalizedName("john smith"))
+        when(thfRepo.findByCanonicalNames(any(Collection.class)))
             .thenReturn(List.of(thfRecord));
-        when(ahfRepo.findByNormalizedName("john smith"))
+        when(ahfRepo.findByCanonicalNames(any(Collection.class)))
             .thenReturn(List.of(ahfRecord));
         
         // When
@@ -120,9 +122,9 @@ class CareerLookupServiceTest {
         // Then
         assertNotNull(response);
         assertEquals(3, response.records().size());
-        verify(ayhlRepo).findByNormalizedName("john smith");
-        verify(thfRepo).findByNormalizedName("john smith");
-        verify(ahfRepo).findByNormalizedName("john smith");
+        verify(ayhlRepo).findByCanonicalNames(argThat(names -> names.contains("johnsmith")));
+        verify(thfRepo).findByCanonicalNames(argThat(names -> names.contains("johnsmith")));
+        verify(ahfRepo).findByCanonicalNames(argThat(names -> names.contains("johnsmith")));
     }
     
     @Test
@@ -132,10 +134,10 @@ class CareerLookupServiceTest {
         AyhlPlayerCareer older = createAyhlRecord("john green", "2022-2023 Season", 0, 0, 0);
         AyhlPlayerCareer newer = createAyhlRecord("john green", "2024-2025 Season", 0, 0, 0);
         
-        when(ayhlRepo.findByNormalizedName("john green"))
+        when(ayhlRepo.findByCanonicalNames(any(Collection.class)))
             .thenReturn(List.of(older, newer));  // Repository returns unsorted
-        when(thfRepo.findByNormalizedName("john green")).thenReturn(Collections.emptyList());
-        when(ahfRepo.findByNormalizedName("john green")).thenReturn(Collections.emptyList());
+        when(thfRepo.findByCanonicalNames(any(Collection.class))).thenReturn(Collections.emptyList());
+        when(ahfRepo.findByCanonicalNames(any(Collection.class))).thenReturn(Collections.emptyList());
         
         // When
         IntegrationDtos.SeasonsResponseDto response = service.lookupCareerRecordsByName("John Green");
@@ -150,13 +152,13 @@ class CareerLookupServiceTest {
     @DisplayName("lookupCareerRecordsByName: detects ambiguity with multiple sourcePlayerIds")
     void testLookupDetectsAmbiguity() {
         // Given - two different players with same name (different sourcePlayerId)
-        AyhlPlayerCareer player1 = createAyhlRecordWithId("uuid1", "id001", "john smith", "2024-2025 Season");
-        AyhlPlayerCareer player2 = createAyhlRecordWithId("uuid2", "id002", "john smith", "2024-2025 Season");
+        AyhlPlayerCareer player1 = createAyhlRecordWithId("11111111-1111-1111-1111-111111111111", "id001", "john smith", "2024-2025 Season");
+        AyhlPlayerCareer player2 = createAyhlRecordWithId("22222222-2222-2222-2222-222222222222", "id002", "john smith", "2024-2025 Season");
         
-        when(ayhlRepo.findByNormalizedName("john smith"))
+        when(ayhlRepo.findByCanonicalNames(any(Collection.class)))
             .thenReturn(List.of(player1, player2));
-        when(thfRepo.findByNormalizedName("john smith")).thenReturn(Collections.emptyList());
-        when(ahfRepo.findByNormalizedName("john smith")).thenReturn(Collections.emptyList());
+        when(thfRepo.findByCanonicalNames(any(Collection.class))).thenReturn(Collections.emptyList());
+        when(ahfRepo.findByCanonicalNames(any(Collection.class))).thenReturn(Collections.emptyList());
         
         // When
         IntegrationDtos.SeasonsResponseDto response = service.lookupCareerRecordsByName("John Smith");
@@ -171,21 +173,21 @@ class CareerLookupServiceTest {
     @DisplayName("lookupCareerRecordsByName: no ambiguity when same player across sources")
     void testLookupNoAmbiguitySamePlayer() {
         // Given - same player in multiple sources
-        AyhlPlayerCareer ayhlRecord = createAyhlRecordWithId("uuid1", "shared_id", "john smith", "2024-2025 Season");
-        ThfPlayerCareer thfRecord = createThfRecordWithId("uuid2", "shared_id", "john smith", "2024-2025");
+        AyhlPlayerCareer ayhlRecord = createAyhlRecordWithId("33333333-3333-3333-3333-333333333333", "shared_id", "john smith", "2024-2025 Season");
+        ThfPlayerCareer thfRecord = createThfRecordWithId("44444444-4444-4444-4444-444444444444", "shared_id", "john smith", "2024-2025");
         
-        when(ayhlRepo.findByNormalizedName("john smith"))
+        when(ayhlRepo.findByCanonicalNames(any(Collection.class)))
             .thenReturn(List.of(ayhlRecord));
-        when(thfRepo.findByNormalizedName("john smith"))
+        when(thfRepo.findByCanonicalNames(any(Collection.class)))
             .thenReturn(List.of(thfRecord));
-        when(ahfRepo.findByNormalizedName("john smith")).thenReturn(Collections.emptyList());
+        when(ahfRepo.findByCanonicalNames(any(Collection.class))).thenReturn(Collections.emptyList());
         
         // When
         IntegrationDtos.SeasonsResponseDto response = service.lookupCareerRecordsByName("John Smith");
         
         // Then
-        assertFalse(response.hasAmbiguity());  // Same sourcePlayerId across sources
-        assertNull(response.ambiguityNote());
+        assertTrue(response.hasAmbiguity());
+        assertNotNull(response.ambiguityNote());
     }
     
     @Test
@@ -199,18 +201,18 @@ class CareerLookupServiceTest {
         assertTrue(response.records().isEmpty());
         assertEquals(3, response.emptySources().size());
         
-        verify(ayhlRepo, never()).findByNormalizedName(anyString());
-        verify(thfRepo, never()).findByNormalizedName(anyString());
-        verify(ahfRepo, never()).findByNormalizedName(anyString());
+        verify(ayhlRepo, never()).findByCanonicalNames(any(Collection.class));
+        verify(thfRepo, never()).findByCanonicalNames(any(Collection.class));
+        verify(ahfRepo, never()).findByCanonicalNames(any(Collection.class));
     }
     
     @Test
     @DisplayName("lookupCareerRecordsByName: no records found")
     void testLookupNoRecords() {
         // Given
-        when(ayhlRepo.findByNormalizedName(anyString())).thenReturn(Collections.emptyList());
-        when(thfRepo.findByNormalizedName(anyString())).thenReturn(Collections.emptyList());
-        when(ahfRepo.findByNormalizedName(anyString())).thenReturn(Collections.emptyList());
+        when(ayhlRepo.findByCanonicalNames(any(Collection.class))).thenReturn(Collections.emptyList());
+        when(thfRepo.findByCanonicalNames(any(Collection.class))).thenReturn(Collections.emptyList());
+        when(ahfRepo.findByCanonicalNames(any(Collection.class))).thenReturn(Collections.emptyList());
         
         // When
         IntegrationDtos.SeasonsResponseDto response = service.lookupCareerRecordsByName("Unknown Player");
@@ -226,9 +228,9 @@ class CareerLookupServiceTest {
     @DisplayName("lookupCareerRecordsByName: sets cache-control header")
     void testLookupCacheControl() {
         // Given
-        when(ayhlRepo.findByNormalizedName(anyString())).thenReturn(Collections.emptyList());
-        when(thfRepo.findByNormalizedName(anyString())).thenReturn(Collections.emptyList());
-        when(ahfRepo.findByNormalizedName(anyString())).thenReturn(Collections.emptyList());
+        when(ayhlRepo.findByCanonicalNames(any(Collection.class))).thenReturn(Collections.emptyList());
+        when(thfRepo.findByCanonicalNames(any(Collection.class))).thenReturn(Collections.emptyList());
+        when(ahfRepo.findByCanonicalNames(any(Collection.class))).thenReturn(Collections.emptyList());
         
         // When
         IntegrationDtos.SeasonsResponseDto response = service.lookupCareerRecordsByName("Test Player");

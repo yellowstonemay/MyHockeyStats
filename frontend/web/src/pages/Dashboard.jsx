@@ -1,12 +1,84 @@
-import React, { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import React, { useEffect, useMemo, useState } from 'react'
 import { Button } from '../components/Button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/Card'
-import { BarChart3 } from 'lucide-react'
+import { AlertCircle, Loader2, RefreshCw } from 'lucide-react'
+import { integrationsApi } from '../lib/integrationsApi'
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState('overview')
-  const navigate = useNavigate()
+  const [seasonRecords, setSeasonRecords] = useState([])
+  const [seasonsLoading, setSeasonsLoading] = useState(false)
+  const [seasonsError, setSeasonsError] = useState('')
+
+  const getSeasonStartYear = (seasonValue) => {
+    if (seasonValue == null) return 0
+    const seasonText = String(seasonValue).trim()
+    const match = seasonText.match(/(\d{4})/)
+    return match ? Number(match[1]) : 0
+  }
+
+  const sortedSeasonRecords = useMemo(() => {
+    return [...seasonRecords].sort((a, b) => {
+      const seasonA = getSeasonStartYear(a.season)
+      const seasonB = getSeasonStartYear(b.season)
+      if (seasonB !== seasonA) return seasonB - seasonA
+
+      const teamA = (a.team || '').toLowerCase()
+      const teamB = (b.team || '').toLowerCase()
+      return teamA.localeCompare(teamB)
+    })
+  }, [seasonRecords])
+
+  const careerTotals = useMemo(() => {
+    return seasonRecords.reduce(
+      (acc, r) => ({
+        games: acc.games + (r.gamesPlayed ?? 0),
+        goals: acc.goals + (r.goals ?? 0),
+        assists: acc.assists + (r.assists ?? 0),
+        points: acc.points + (r.points ?? 0),
+      }),
+      { games: 0, goals: 0, assists: 0, points: 0 }
+    )
+  }, [seasonRecords])
+
+  const totalsByLeague = useMemo(() => {
+    const map = {}
+    seasonRecords.forEach((r) => {
+      const league = r.source || 'Unknown'
+      if (!map[league]) map[league] = { league, seasons: 0, games: 0, goals: 0, assists: 0, points: 0 }
+      map[league].seasons += 1
+      map[league].games += r.gamesPlayed ?? 0
+      map[league].goals += r.goals ?? 0
+      map[league].assists += r.assists ?? 0
+      map[league].points += r.points ?? 0
+    })
+    return Object.values(map).sort((a, b) => b.games - a.games)
+  }, [seasonRecords])
+
+  const loadSeasons = async () => {
+    setSeasonsLoading(true)
+    setSeasonsError('')
+    try {
+      const response = await integrationsApi.fetchMySeasons('')
+      setSeasonRecords(response.records || [])
+    } catch (err) {
+      setSeasonsError(err.message || 'Failed to load season data')
+    } finally {
+      setSeasonsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (seasonRecords.length === 0 && !seasonsLoading && !seasonsError) {
+      loadSeasons()
+    }
+  }, [])
+
+  useEffect(() => {
+    if (activeTab === 'seasons' && seasonRecords.length === 0 && !seasonsLoading && !seasonsError) {
+      loadSeasons()
+    }
+  }, [activeTab, seasonRecords.length, seasonsLoading, seasonsError])
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -38,13 +110,6 @@ export default function Dashboard() {
                       <span>{item.label}</span>
                     </button>
                   ))}
-                  <button
-                    onClick={() => navigate('/integrated-history')}
-                    className="flex items-center space-x-3 px-4 py-3 border-t border-slate-200 text-left text-slate-600 hover:bg-slate-50 transition-colors"
-                  >
-                    <span>🔗</span>
-                    <span>Integrated History</span>
-                  </button>
                 </nav>
               </CardContent>
             </Card>
@@ -60,20 +125,88 @@ export default function Dashboard() {
                     <CardDescription>Here's your hockey stats overview</CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                      <div className="bg-gradient-to-br from-primary-50 to-primary-100 rounded-lg p-4">
-                        <div className="text-3xl font-bold text-primary-600">0</div>
-                        <p className="text-sm text-slate-600 mt-1">Total Games</p>
+                    {seasonsLoading && (
+                      <div className="flex items-center justify-center py-6 text-slate-500">
+                        <Loader2 className="w-5 h-5 animate-spin mr-2" />
+                        <span>Loading career stats…</span>
                       </div>
-                      <div className="bg-gradient-to-br from-secondary-50 to-secondary-100 rounded-lg p-4">
-                        <div className="text-3xl font-bold text-secondary-600">0</div>
-                        <p className="text-sm text-slate-600 mt-1">Total Goals</p>
+                    )}
+                    {!seasonsLoading && (
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                        <div className="bg-gradient-to-br from-primary-50 to-primary-100 rounded-lg p-4">
+                          <div className="text-3xl font-bold text-primary-600">{careerTotals.games}</div>
+                          <p className="text-sm text-slate-600 mt-1">Total Games</p>
+                        </div>
+                        <div className="bg-gradient-to-br from-secondary-50 to-secondary-100 rounded-lg p-4">
+                          <div className="text-3xl font-bold text-secondary-600">{careerTotals.goals}</div>
+                          <p className="text-sm text-slate-600 mt-1">Total Goals</p>
+                        </div>
+                        <div className="bg-gradient-to-br from-amber-50 to-amber-100 rounded-lg p-4">
+                          <div className="text-3xl font-bold text-amber-600">{careerTotals.assists}</div>
+                          <p className="text-sm text-slate-600 mt-1">Total Assists</p>
+                        </div>
+                        <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-lg p-4">
+                          <div className="text-3xl font-bold text-green-600">{careerTotals.points}</div>
+                          <p className="text-sm text-slate-600 mt-1">Total Points</p>
+                        </div>
                       </div>
-                      <div className="bg-gradient-to-br from-amber-50 to-amber-100 rounded-lg p-4">
-                        <div className="text-3xl font-bold text-amber-600">0</div>
-                        <p className="text-sm text-slate-600 mt-1">Total Assists</p>
+                    )}
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Totals by League</CardTitle>
+                    <CardDescription>Career statistics broken down by league</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {seasonsLoading && (
+                      <div className="flex items-center justify-center py-4 text-slate-500">
+                        <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                        <span>Loading…</span>
                       </div>
-                    </div>
+                    )}
+                    {!seasonsLoading && totalsByLeague.length === 0 && (
+                      <p className="text-slate-500 text-sm text-center py-4">No league data available yet.</p>
+                    )}
+                    {!seasonsLoading && totalsByLeague.length > 0 && (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm border border-slate-200 rounded-lg overflow-hidden">
+                          <thead className="bg-slate-100 text-slate-700">
+                            <tr>
+                              <th className="px-3 py-2 text-left">League</th>
+                              <th className="px-3 py-2 text-right">Seasons</th>
+                              <th className="px-3 py-2 text-right">GP</th>
+                              <th className="px-3 py-2 text-right">G</th>
+                              <th className="px-3 py-2 text-right">A</th>
+                              <th className="px-3 py-2 text-right">PTS</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {totalsByLeague.map((row) => (
+                              <tr key={row.league} className="border-t border-slate-200 hover:bg-slate-50">
+                                <td className="px-3 py-2 font-medium">{row.league}</td>
+                                <td className="px-3 py-2 text-right">{row.seasons}</td>
+                                <td className="px-3 py-2 text-right">{row.games}</td>
+                                <td className="px-3 py-2 text-right">{row.goals}</td>
+                                <td className="px-3 py-2 text-right">{row.assists}</td>
+                                <td className="px-3 py-2 text-right font-semibold text-primary-700">{row.points}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                          <tfoot className="bg-slate-50 text-slate-700 font-semibold border-t-2 border-slate-300">
+                            <tr>
+                              <td className="px-3 py-2">Total</td>
+                              <td className="px-3 py-2 text-right">{totalsByLeague.reduce((s, r) => s + r.seasons, 0)}</td>
+                              <td className="px-3 py-2 text-right">{careerTotals.games}</td>
+                              <td className="px-3 py-2 text-right">{careerTotals.goals}</td>
+                              <td className="px-3 py-2 text-right">{careerTotals.assists}</td>
+                              <td className="px-3 py-2 text-right text-primary-700">{careerTotals.points}</td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
 
@@ -100,12 +233,65 @@ export default function Dashboard() {
               <Card>
                 <CardHeader>
                   <CardTitle>Your Seasons</CardTitle>
-                  <CardDescription>Manage and view your hockey seasons</CardDescription>
+                  <CardDescription>One table view of your seasons, sorted from latest to oldest</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-slate-600 text-center py-8">
-                    No seasons yet. <button className="text-primary-600 hover:underline">Add your first season</button> to get started.
-                  </p>
+                  {seasonsError && (
+                    <div className="p-4 bg-red-100 border border-red-400 text-red-700 rounded-md mb-4 flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <AlertCircle className="w-5 h-5" />
+                        <span>{seasonsError}</span>
+                      </div>
+                      <Button onClick={loadSeasons} variant="outline" size="sm" disabled={seasonsLoading}>
+                        <RefreshCw className="w-4 h-4 mr-2" />
+                        Retry
+                      </Button>
+                    </div>
+                  )}
+
+                  {seasonsLoading && (
+                    <div className="flex items-center justify-center py-10 text-slate-600">
+                      <Loader2 className="w-5 h-5 animate-spin mr-2" />
+                      <span>Loading seasons...</span>
+                    </div>
+                  )}
+
+                  {!seasonsLoading && !seasonsError && sortedSeasonRecords.length === 0 && (
+                    <p className="text-slate-600 text-center py-8">No season data found yet.</p>
+                  )}
+
+                  {!seasonsLoading && !seasonsError && sortedSeasonRecords.length > 0 && (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm border border-slate-200 rounded-lg overflow-hidden">
+                        <thead className="bg-slate-100 text-slate-700">
+                          <tr>
+                            <th className="px-3 py-2 text-left">Season</th>
+                            <th className="px-3 py-2 text-left">League</th>
+                            <th className="px-3 py-2 text-left">Club</th>
+                            <th className="px-3 py-2 text-left">Team</th>
+                            <th className="px-3 py-2 text-right">GP</th>
+                            <th className="px-3 py-2 text-right">G</th>
+                            <th className="px-3 py-2 text-right">A</th>
+                            <th className="px-3 py-2 text-right">PTS</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sortedSeasonRecords.map((record, idx) => (
+                            <tr key={`${record.source || 'src'}-${record.sourcePlayerId || idx}-${record.season || 'season'}`} className="border-t border-slate-200 hover:bg-slate-50">
+                              <td className="px-3 py-2 font-medium">{record.season || '—'}</td>
+                              <td className="px-3 py-2">{record.source || '—'}</td>
+                              <td className="px-3 py-2">{record.club || '—'}</td>
+                              <td className="px-3 py-2">{record.team || '—'}</td>
+                              <td className="px-3 py-2 text-right">{record.gamesPlayed ?? 0}</td>
+                              <td className="px-3 py-2 text-right">{record.goals ?? 0}</td>
+                              <td className="px-3 py-2 text-right">{record.assists ?? 0}</td>
+                              <td className="px-3 py-2 text-right font-semibold text-primary-700">{record.points ?? 0}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             )}

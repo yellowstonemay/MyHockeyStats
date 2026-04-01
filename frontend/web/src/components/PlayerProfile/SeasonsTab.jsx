@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../Ca
 import { Button } from '../Button'
 import { AlertCircle, Loader2, RefreshCw } from 'lucide-react'
 
-export default function SeasonsTab({ playerId }) {
+export default function SeasonsTab() {
   const [records, setRecords] = useState([])
   const [selectedSeason, setSelectedSeason] = useState('')
   const [loading, setLoading] = useState(true)
@@ -13,13 +13,13 @@ export default function SeasonsTab({ playerId }) {
 
   useEffect(() => {
     loadSeasons()
-  }, [playerId])
+  }, [])
 
   const loadSeasons = async () => {
     setLoading(true)
     setError('')
     try {
-      const response = await integrationsApi.fetchPlayerSeasons(playerId, selectedSeason)
+      const response = await integrationsApi.fetchMySeasons(selectedSeason)
       setRecords(response.records || [])
       setAmbiguity(response.hasAmbiguity ? response.ambiguityNote : null)
     } catch (err) {
@@ -35,7 +35,7 @@ export default function SeasonsTab({ playerId }) {
     setLoading(true)
     setError('')
     try {
-      const response = await integrationsApi.fetchPlayerSeasons(playerId, season)
+      const response = await integrationsApi.fetchMySeasons(season)
       setRecords(response.records || [])
       setAmbiguity(response.hasAmbiguity ? response.ambiguityNote : null)
     } catch (err) {

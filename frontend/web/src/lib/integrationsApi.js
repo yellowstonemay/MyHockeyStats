@@ -42,9 +42,9 @@ export const integrationsApi = {
     return api.fetchWithAuth('/integrations/imports/daily/latest')
   },
 
-  // New simplified seasons API (no persistent matching)
-  fetchPlayerSeasons(playerId, season) {
+  // New simplified seasons API for currently authenticated player
+  fetchMySeasons(season) {
     const query = season ? `?season=${encodeURIComponent(season)}` : ''
-    return api.fetchWithAuth(`/api/players/${playerId}/seasons${query}`)
+    return api.fetchWithAuth(`/players/me/seasons${query}`)
   },
 }
