@@ -17,11 +17,13 @@ Usage:
 
 import argparse
 import csv
+import os
 import time
 from playwright.sync_api import sync_playwright
 
 # Mapping from provided season year to site seasonid
 SEASON_TO_ID = {
+    2026: 34,
     2025: 33,
     2024: 32,
     2023: 31,
@@ -143,7 +145,11 @@ def main():
         print(f"Unknown season {args.season}. Please provide a supported season year.")
         return
 
-    output_file = f"{args.season}-ayhl-teams.csv"
+    # Write teams CSV into the data/teams subdirectory
+    output_dir = os.path.join(os.path.dirname(__file__), 'data', 'teams')
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir, exist_ok=True)
+    output_file = os.path.join(output_dir, f"{args.season}-ayhl-teams.csv")
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)

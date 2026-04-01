@@ -1,0 +1,6 @@
+let us write probram to create thf_player_career table in database based on data from gamesheet/6579_players.csv and 6579_players_stats.csv. 
+1. use the same data structure with ayhl_player_career data 
+2. in 6579_players.csv, any row with flags of [x] is invalid data and should be bypass.
+3. loop through each player in 6579_players.csv which flags is not [x], get player_id and look for all rows in 6579_players_stats.csv. if the season of the row start with THF, then update the data from the row into thf_player_career table. (notes: the season saved into database should remove THF - from the beginning, for example, THF - 2024-2025 Regular Season in the csv, "2024-2025 Regular Season" saved into table)
+
+do the same for ahf_player_career table, which the season start with AHF

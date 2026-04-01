@@ -1,0 +1,7 @@
+target/
+.git/
+Dockerfile*
+.dockerignore
+*.log*
+.env*
+coverage/

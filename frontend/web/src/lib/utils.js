@@ -62,7 +62,7 @@ export const api = {
     return this.fetchWithAuth(`/players/${playerId}`)
   },
 
-  async createProfile(fullName, birthdate, location, position) {
+  async createProfile(fullName, birthMonthYear, location, position) {
     const token = this.getToken()
     const res = await fetch(`${this.baseUrl}/players`, {
       method: 'POST',
@@ -70,13 +70,13 @@ export const api = {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`,
       },
-      body: JSON.stringify({ fullName, birthdate, location, position }),
+      body: JSON.stringify({ fullName, birthMonthYear, location, position }),
     })
     if (!res.ok) throw new Error('Failed to create profile')
     return res.json()
   },
 
-  async updateProfile(playerId, fullName, location, position, photoUrl) {
+  async updateProfile(playerId, fullName, birthMonthYear, location, position, photoUrl) {
     const token = this.getToken()
     const res = await fetch(`${this.baseUrl}/players/${playerId}`, {
       method: 'PUT',
@@ -84,7 +84,7 @@ export const api = {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`,
       },
-      body: JSON.stringify({ fullName, location, position, photoUrl }),
+      body: JSON.stringify({ fullName, birthMonthYear, location, position, photoUrl }),
     })
     if (!res.ok) throw new Error('Failed to update profile')
     return res.json()

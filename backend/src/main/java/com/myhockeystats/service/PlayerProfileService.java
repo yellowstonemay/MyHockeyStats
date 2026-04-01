@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDate;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.UUID;
 
 @Service
 public class PlayerProfileService {
@@ -35,8 +36,28 @@ public class PlayerProfileService {
         return playerProfileRepository.findById(profileId);
     }
 
-    public PlayerProfile updateProfile(PlayerProfile profile, String fullName, String location, String position, String photoUrl) {
+    /**
+     * Get player profile by player ID (UUID as String).
+     * Used by SeasonsController to retrieve player name for career lookup.
+     * 
+     * @param playerId player ID as String UUID
+     * @return Optional containing PlayerProfile if found
+     */
+    public Optional<PlayerProfile> getPlayerProfile(String playerId) {
+        try {
+            UUID uuid = UUID.fromString(playerId);
+            // Currently, profiles are stored with Long IDs
+            // This method should be adapted based on actual ID scheme
+            // For now, returning empty - to be implemented with proper ID resolution
+            return Optional.empty();
+        } catch (IllegalArgumentException e) {
+            return Optional.empty();
+        }
+    }
+
+    public PlayerProfile updateProfile(PlayerProfile profile, String fullName, LocalDate birthdate, String location, String position, String photoUrl) {
         if (fullName != null) profile.setFullName(fullName);
+        if (birthdate != null) profile.setBirthdate(birthdate);
         if (location != null) profile.setLocation(location);
         if (position != null) profile.setPosition(position);
         if (photoUrl != null) profile.setPhotoUrl(photoUrl);

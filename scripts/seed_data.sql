@@ -6,7 +6,7 @@
 INSERT INTO users (email, password, full_name, created_at) 
 VALUES (
   'ethan.yan@example.com',
-  'TestPassword123',  -- In production, this would be hashed with bcrypt
+  '$2a$10$mShMM5jife8qFUwfWXRD8.3uDPwTn9z2oexqKtxfEaLAalIo/Euo6',  -- BCrypt hash for TestPassword123
   'Ethan Yan',
   NOW()
 ) ON CONFLICT (email) DO NOTHING;
@@ -89,8 +89,8 @@ game_data AS (
     (row_number() OVER (ORDER BY g.opponent) * 13) % 2 as assists
   FROM season_data s, game_opponents g
 )
-INSERT INTO games (season_id, date, opponent, final_score, created_at)
-SELECT season_id, game_date, opponent, final_score, NOW()
+INSERT INTO games (season_id, date, opponent, final_score)
+SELECT season_id, game_date, opponent, final_score
 FROM game_data
 WHERE NOT EXISTS (
   SELECT 1 FROM games g2
@@ -123,13 +123,39 @@ game_perf_data AS (
   FROM season_data s
   INNER JOIN games g ON g.season_id = s.id
 )
-INSERT INTO game_performances (game_id, player_profile_id, goals, assists, notes, created_at)
-SELECT game_id, player_profile_id, goals, assists, 'Game ' || game_num || ' stats', NOW()
+INSERT INTO game_performances (game_id, player_profile_id, goals, assists, notes)
+SELECT game_id, player_profile_id, goals, assists, 'Game ' || game_num || ' stats'
 FROM game_perf_data
 WHERE NOT EXISTS (
   SELECT 1 FROM game_performances gp 
   WHERE gp.game_id = game_perf_data.game_id
 );
+
+-- Create second test user (Paden Zhou) for integration history testing
+INSERT INTO users (email, password, full_name, created_at)
+VALUES (
+  'paden.zhou@example.com',
+  '$2a$10$mShMM5jife8qFUwfWXRD8.3uDPwTn9z2oexqKtxfEaLAalIo/Euo6',  -- BCrypt hash for TestPassword123
+  'Paden Zhou',
+  NOW()
+) ON CONFLICT (email) DO NOTHING;
+
+WITH user_data AS (
+  SELECT id FROM users WHERE email = 'paden.zhou@example.com'
+)
+INSERT INTO player_profiles (user_id, full_name, birthdate, location, created_at, updated_at)
+SELECT
+  u.id,
+  'Paden Zhou',
+  '2011-05-01'::date,
+  'New Jersey, USA',
+  NOW(),
+  NOW()
+FROM user_data u
+WHERE NOT EXISTS (
+  SELECT 1 FROM player_profiles WHERE user_id = u.id
+);
+
 
 -- Confirm insertion
 SELECT COUNT(*) as total_games FROM games
@@ -142,4 +168,4 @@ WHERE season_id IN (
   AND s.year_end = 2026
 );
 
-SELECT 'Test data seeded successfully! Login with ethan.yan@example.com / TestPassword123' as message;
+SELECT 'Test data seeded successfully! Login with ethan.yan@example.com or paden.zhou@example.com / TestPassword123' as message;

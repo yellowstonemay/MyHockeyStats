@@ -1,0 +1,7 @@
+weekly update:
+let us run scrape_teams every week.
+
+daily update:
+scrape_rosters daily
+then
+upsert_career_from_roster_csv.js

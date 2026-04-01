@@ -23,7 +23,12 @@ from playwright.sync_api import sync_playwright
 
 
 def parse_roster_table(table):
-    """Parse a Playwright table element into header and row texts."""
+    """Parse a Playwright table element into header and row texts and anchors.
+
+    Returns (header, parsed) where parsed is a list of dicts with keys:
+      - 'texts': list of column inner_text() strings
+      - 'anchors': list of anchor hrefs for each column (or None)
+    """
     rows = table.query_selector_all('tbody tr')
     parsed = []
     header = []
@@ -40,9 +45,25 @@ def parse_roster_table(table):
 
     for r in rows[start_idx:]:
         cols = r.query_selector_all('td')
+        if not cols:
+            continue
+
         texts = [c.inner_text().strip() for c in cols]
+
+        # capture first anchor href in each column (if present)
+        anchors = []
+        for c in cols:
+            a = c.query_selector('a')
+            href = None
+            if a:
+                try:
+                    href = a.get_attribute('href')
+                except Exception:
+                    href = None
+            anchors.append(href)
+
         if texts:
-            parsed.append(texts)
+            parsed.append({'texts': texts, 'anchors': anchors})
 
     return header, parsed
 
@@ -80,7 +101,9 @@ def scrape_roster_page(page, url):
             hdr_upper = [h.upper() for h in header]
             if header and (any('PLAYER' in h for h in hdr_upper) or any('BD' in h or 'BIRTH' in h for h in hdr_upper)):
                 player_dicts = []
-                for texts in rows:
+                for row_entry in rows:
+                    texts = row_entry.get('texts', [])
+                    anchors = row_entry.get('anchors', [])
                     d = {}
                     if header and len(header) <= len(texts):
                         for i, col_name in enumerate(header):
@@ -95,6 +118,36 @@ def scrape_roster_page(page, url):
                         d['shot'] = texts[5] if len(texts) > 5 else ''
                         d['bd'] = texts[6] if len(texts) > 6 else ''
                         d['hometown'] = texts[7] if len(texts) > 7 else ''
+
+                    # Extract playerid from anchor hrefs if present.
+                    playerid = None
+                    # try to locate a player column index if header exists
+                    player_col_idx = None
+                    if header:
+                        for i, col_name in enumerate(header):
+                            if 'player' in col_name.strip().lower():
+                                player_col_idx = i
+                                break
+
+                    if player_col_idx is not None and player_col_idx < len(anchors):
+                        href = anchors[player_col_idx]
+                        if href:
+                            m = re.search(r'playerid=(\d+)', href)
+                            if m:
+                                playerid = m.group(1)
+
+                    # fallback: search any anchor in the row for playerid
+                    if not playerid:
+                        for href in anchors:
+                            if href:
+                                m = re.search(r'playerid=(\d+)', href)
+                                if m:
+                                    playerid = m.group(1)
+                                    break
+
+                    if playerid:
+                        d['playerid'] = playerid
+
                     player_dicts.append(d)
 
                 return {
@@ -110,12 +163,17 @@ def scrape_roster_page(page, url):
 
 def main():
     parser = argparse.ArgumentParser(description="Scrape rosters from Atlantic Hockey using a discovered teams CSV file.")
-    parser.add_argument('input_file', help='Input CSV file with discovered teams (e.g., "2025-ayhl-teams.csv")')
-    parser.add_argument('--output', help='Output CSV file for rosters (default: auto-generated from input file name)')
+    parser.add_argument('input_file', nargs='?', default=None, help='Input CSV file with discovered teams (e.g., "2025-ayhl-teams.csv")')
+    parser.add_argument('--season', type=int, default=None, help='Season year (e.g. 2025) to read teams from data/teams')
+    parser.add_argument('--output', help='Output CSV file for rosters (default: auto-generated into data/rosters)')
     parser.add_argument('--delay', type=float, default=0.1, help='Delay between requests (seconds)')
     args = parser.parse_args()
 
     input_file = args.input_file
+
+    # If caller provided a --season but not an explicit input file, use data/teams/{season}-ayhl-teams.csv
+    if not input_file and args.season:
+        input_file = os.path.join(os.path.dirname(__file__), 'data', 'teams', f"{args.season}-ayhl-teams.csv")
 
     # Infer season from filename to provide helpful messages
     season_year_from_filename = None
@@ -123,15 +181,35 @@ def main():
     if match:
         season_year_from_filename = int(match.group(1))
 
-    # Determine output file
+    # Determine output file (default into data/rosters)
     output_file = args.output
     if not output_file:
-        # Generate from input: 2025-ayhl-teams.csv -> 2025-ayhl-rosters.csv
-        output_file = input_file.replace('teams.csv', 'rosters.csv')
-        # As a fallback, if 'teams.csv' isn't in the name
-        if output_file == input_file:
-            base, ext = os.path.splitext(input_file)
-            output_file = f"{base}-rosters.csv"
+        if input_file:
+            # Generate from input: 2025-ayhl-teams.csv -> 2025-ayhl-rosters.csv
+            output_file = input_file.replace('teams.csv', 'rosters.csv')
+
+        # If replacement didn't change input or no input_file provided, construct path under data/rosters
+        if not output_file or output_file == input_file:
+            base_name = None
+            if input_file:
+                base_name = os.path.basename(input_file)
+            elif season_year_from_filename:
+                base_name = f"{season_year_from_filename}-ayhl-teams.csv"
+            else:
+                base_name = 'ayhl-teams.csv'
+
+            base_root = os.path.splitext(base_name)[0]
+            if base_root.endswith('-ayhl-teams'):
+                out_basename = base_root.replace('-ayhl-teams', '-ayhl-rosters') + '.csv'
+            else:
+                out_basename = base_root + '-rosters.csv'
+
+            output_file = os.path.join(os.path.dirname(__file__), 'data', 'rosters', out_basename)
+
+    # Ensure output directory exists
+    out_dir = os.path.dirname(output_file)
+    if out_dir and not os.path.exists(out_dir):
+        os.makedirs(out_dir, exist_ok=True)
 
 
     # Read the discovered teams list
@@ -160,7 +238,7 @@ def main():
     
     print(f"✅ Loaded {len(league_team_list)} league-team pairs\n")
     
-    fieldnames = ['season_year', 'seasonid', 'leagueid', 'teamid', 'team', 'number', 'player', 'pos', 'ht', 'wt', 'shot', 'birthdate', 'hometown']
+    fieldnames = ['season_year', 'seasonid', 'leagueid', 'teamid', 'team', 'number', 'playerid', 'player', 'pos', 'ht', 'wt', 'shot', 'birthdate', 'hometown']
 
     print(f"Scraping rosters for {len(league_team_list)} teams...")
     print(f"Output: '{output_file}'\n")
@@ -209,6 +287,7 @@ def main():
                             'teamid': teamid or '',
                             'team': roster_team_name,
                             'number': pd.get('#') or pd.get('number') or '',
+                            'playerid': pd.get('playerid') or '',
                             'player': pd.get('player') or pd.get('player name') or pd.get('player_name') or '',
                             'pos': pd.get('pos') or pd.get('position') or '',
                             'ht': pd.get('ht') or '',

@@ -1,14 +1,22 @@
 # Java
 /target/
 /.mvn/
+build/
+*.class
+*.jar
 
 # Node
 /frontend/web/node_modules/
 /frontend/web/dist/
 /scripts/thf-js/node_modules/
+*.log
+.env*
 
 # OS
 .DS_Store
+Thumbs.db
+*.tmp
+*.swp
 
 # IDE
 .vscode/

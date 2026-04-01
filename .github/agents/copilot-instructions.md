@@ -5,6 +5,8 @@ Auto-generated from all feature plans. Last updated: 2026-02-23
 ## Active Technologies
 - Java 17 (backend), JavaScript/TypeScript (frontend), Python 3.x (scripts) + Spring Boot 3.1.4, Spring Security, JJWT, PostgreSQL JDBC driver, React 18, Vite, Tailwind CSS, shadcn/ui, Playwright (Python) (001-youth-homepage)
 - PostgreSQL container (dev/CI) with named volume; data model described in data-model.md (001-youth-homepage)
+- Java 17 (Spring Boot 3.x), React 18 + Vite, PostgreSQL 13+ (002-integrate-player-data)
+- PostgreSQL with existing career tables: `ayhl_player_career`, `thf_player_career`, `ahf_player_career`, plus related account/player/user tables (002-integrate-player-data)
 
 - Java 17 (backend), JavaScript/React 18 + Vite (frontend) + Spring Boot 3.1.4, Spring Data JPA, Spring Security, JJWT, OpenPDF; Vite, React, React Router (001-youth-homepage)
 
@@ -25,6 +27,7 @@ npm test; npm run lint
 Java 17 (backend), JavaScript/React 18 + Vite (frontend): Follow standard conventions
 
 ## Recent Changes
+- 002-integrate-player-data: Added Java 17 (Spring Boot 3.x), React 18 + Vite, PostgreSQL 13+
 - 001-youth-homepage: Added Java 17 (backend), JavaScript/TypeScript (frontend), Python 3.x (scripts) + Spring Boot 3.1.4, Spring Security, JJWT, PostgreSQL JDBC driver, React 18, Vite, Tailwind CSS, shadcn/ui, Playwright (Python)
 
 - 001-youth-homepage: Added Java 17 (backend), JavaScript/React 18 + Vite (frontend) + Spring Boot 3.1.4, Spring Data JPA, Spring Security, JJWT, OpenPDF; Vite, React, React Router
