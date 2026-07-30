@@ -47,4 +47,9 @@ export const integrationsApi = {
     const query = season ? `?season=${encodeURIComponent(season)}` : ''
     return api.fetchWithAuth(`/players/me/seasons${query}`)
   },
+
+  fetchMyGameHistory(seasonYear) {
+    const query = seasonYear ? `?seasonYear=${encodeURIComponent(seasonYear)}` : ''
+    return api.fetchWithAuth(`/players/me/game-history${query}`)
+  },
 }

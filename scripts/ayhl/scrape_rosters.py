@@ -19,7 +19,45 @@ import csv
 import time
 import re
 import os
+import sys
 from playwright.sync_api import sync_playwright
+
+try:
+    from playwright_stealth import Stealth
+    _stealth = Stealth()
+    HAS_STEALTH = True
+except ImportError:
+    HAS_STEALTH = False
+
+try:
+    import psycopg2
+    HAS_PSYCOPG2 = True
+except ImportError:
+    HAS_PSYCOPG2 = False
+
+
+def load_teams_from_db(conn, season_year):
+    """Load teams from ayhl_teams for a given season."""
+    sql = """
+    SELECT season_year, seasonid, leagueid, league_name, team_name, team_params
+    FROM ayhl_teams
+    WHERE season_year = %s
+    ORDER BY league_name, team_name
+    """
+    with conn.cursor() as cur:
+        cur.execute(sql, (season_year,))
+        cols = [desc[0] for desc in cur.description]
+        return [dict(zip(cols, row)) for row in cur.fetchall()]
+
+
+def load_teams_from_csv(csv_path):
+    """Load teams from a CSV file."""
+    teams = []
+    with open(csv_path, 'r', encoding='utf-8') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            teams.append(row)
+    return teams
 
 
 def parse_roster_table(table):
@@ -71,7 +109,13 @@ def parse_roster_table(table):
 def scrape_roster_page(page, url):
     """Load a single roster URL and return parsed roster dict or None."""
     try:
-        page.goto(url, timeout=15000)
+        page.goto(url, timeout=30000, wait_until='load')
+        # Wait for actual content (bypass Cloudflare challenge)
+        try:
+            page.wait_for_selector('table', timeout=15000)
+        except Exception:
+            pass
+        page.wait_for_timeout(3000)
     except Exception:
         return None
 
@@ -167,19 +211,53 @@ def main():
     parser.add_argument('--season', type=int, default=None, help='Season year (e.g. 2025) to read teams from data/teams')
     parser.add_argument('--output', help='Output CSV file for rosters (default: auto-generated into data/rosters)')
     parser.add_argument('--delay', type=float, default=0.1, help='Delay between requests (seconds)')
+    # DB connection (optional — falls back to CSV if omitted)
+    parser.add_argument('--host', default=None, help='PostgreSQL host (skip = CSV only)')
+    parser.add_argument('--port', type=int, default=5432)
+    parser.add_argument('--dbname', default='myhockeystats')
+    parser.add_argument('--user', default='postgres')
+    parser.add_argument('--password', default='postgres')
     args = parser.parse_args()
 
+    season_year = args.season
+    teams = None
     input_file = args.input_file
 
-    # If caller provided a --season but not an explicit input file, use data/teams/{season}-ayhl-teams.csv
-    if not input_file and args.season:
-        input_file = os.path.join(os.path.dirname(__file__), 'data', 'teams', f"{args.season}-ayhl-teams.csv")
+    # Try loading teams from database first (if --host and --season provided)
+    if args.host and args.season and HAS_PSYCOPG2:
+        try:
+            conn = psycopg2.connect(
+                host=args.host, port=args.port,
+                dbname=args.dbname, user=args.user,
+                password=args.password,
+            )
+            db_teams = load_teams_from_db(conn, args.season)
+            conn.close()
+            if db_teams:
+                print(f"✅ Loaded {len(db_teams)} teams from database (ayhl_teams) for season {args.season}")
+                teams = db_teams
+        except Exception as e:
+            print(f"  ⚠ DB load failed: {e} (falling back to CSV)")
 
-    # Infer season from filename to provide helpful messages
+    # Fall back to CSV if no DB teams
+    if teams is None:
+        if not input_file and args.season:
+            input_file = os.path.join(os.path.dirname(__file__), 'data', 'teams', f"{args.season}-ayhl-teams.csv")
+
+        if not input_file or not os.path.exists(input_file):
+            print(f"❌ No team data found. Run discover_teams.py first or provide --host for DB lookup.")
+            sys.exit(1)
+
+        print(f"📄 Loading teams from CSV: {input_file}")
+        teams = load_teams_from_csv(input_file)
+        print(f"✅ Loaded {len(teams)} teams from CSV")
+
+    # Infer season from filename for output path
     season_year_from_filename = None
-    match = re.search(r'(\d{4})', os.path.basename(input_file))
-    if match:
-        season_year_from_filename = int(match.group(1))
+    if args.season:
+        season_year_from_filename = args.season
+    elif teams:
+        season_year_from_filename = teams[0].get('season_year')
 
     # Determine output file (default into data/rosters)
     output_file = args.output
@@ -188,23 +266,16 @@ def main():
             # Generate from input: 2025-ayhl-teams.csv -> 2025-ayhl-rosters.csv
             output_file = input_file.replace('teams.csv', 'rosters.csv')
 
-        # If replacement didn't change input or no input_file provided, construct path under data/rosters
-        if not output_file or output_file == input_file:
-            base_name = None
-            if input_file:
-                base_name = os.path.basename(input_file)
-            elif season_year_from_filename:
-                base_name = f"{season_year_from_filename}-ayhl-teams.csv"
-            else:
-                base_name = 'ayhl-teams.csv'
+        if not output_file and season_year_from_filename:
+            # No input file (loaded from DB) — use season year for filename
+            output_file = os.path.join(
+                os.path.dirname(__file__), 'data', 'rosters',
+                f"{season_year_from_filename}-ayhl-rosters.csv"
+            )
 
-            base_root = os.path.splitext(base_name)[0]
-            if base_root.endswith('-ayhl-teams'):
-                out_basename = base_root.replace('-ayhl-teams', '-ayhl-rosters') + '.csv'
-            else:
-                out_basename = base_root + '-rosters.csv'
-
-            output_file = os.path.join(os.path.dirname(__file__), 'data', 'rosters', out_basename)
+        if not output_file:
+            base_name = 'ayhl-rosters.csv'
+            output_file = os.path.join(os.path.dirname(__file__), 'data', 'rosters', base_name)
 
     # Ensure output directory exists
     out_dir = os.path.dirname(output_file)
@@ -212,25 +283,29 @@ def main():
         os.makedirs(out_dir, exist_ok=True)
 
 
-    # Read the discovered teams list
+    # Read the discovered teams list (from DB or CSV)
     print(f"\n{'='*70}")
     print(f"PHASE 2: SCRAPE ROSTERS")
     print(f"{'='*70}\n")
 
-    print(f"Reading discovered teams from '{input_file}'...")
-    
-    league_team_list = []
-    try:
-        with open(input_file, 'r', encoding='utf-8') as csvfile:
-            reader = csv.DictReader(csvfile)
-            league_team_list = list(reader)
-    except FileNotFoundError:
-        print(f"❌ Error: File '{input_file}' not found.")
-        if season_year_from_filename:
-            print(f"   Please run 'python discover_teams.py --season {season_year_from_filename}' first")
-        else:
-            print(f"   Please ensure the input file exists.")
-        return
+    if teams is not None:
+        # Teams already loaded from DB
+        league_team_list = teams
+        print(f"✅ Using {len(league_team_list)} teams loaded from database")
+    else:
+        print(f"Reading discovered teams from '{input_file}'...")
+        league_team_list = []
+        try:
+            with open(input_file, 'r', encoding='utf-8') as csvfile:
+                reader = csv.DictReader(csvfile)
+                league_team_list = list(reader)
+        except FileNotFoundError:
+            print(f"❌ Error: File '{input_file}' not found.")
+            if season_year_from_filename:
+                print(f"   Please run 'python discover_teams.py --season {season_year_from_filename}' first")
+            else:
+                print(f"   Please ensure the input file exists.")
+            return
     
     if not league_team_list:
         print("No teams found in input file. Exiting.")
@@ -244,9 +319,17 @@ def main():
     print(f"Output: '{output_file}'\n")
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
-
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                '--disable-blink-features=AutomationControlled',
+                '--disable-dev-shm-usage',
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-web-security',
+                '--disable-features=IsolateOrigins,site-per-process',
+            ],
+        )
         with open(output_file, 'w', newline='', encoding='utf-8') as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
@@ -261,11 +344,25 @@ def main():
                 season_year = int(item['season_year'])
                 
                 url = f"https://atlantichockey.org/teamroster.php{team_params}"
+
+                # Fresh context + page per team to avoid Cloudflare detection
+                ctx = browser.new_context(
+                    user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+                    viewport={'width': 1280, 'height': 800},
+                    locale='en-US',
+                    timezone_id='America/New_York',
+                )
+                page = ctx.new_page()
+                if HAS_STEALTH:
+                    _stealth.apply_stealth_sync(page)
                 
                 try:
                     res = scrape_roster_page(page, url)
                 except Exception as e:
                     res = None
+                finally:
+                    page.close()
+                    ctx.close()
                 
                 # Extract teamid from team params
                 teamid = None

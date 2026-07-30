@@ -115,4 +115,39 @@ public final class IntegrationDtos {
             String cacheControl               // "private, max-age=300"
     ) {
     }
+
+    public record GameHistorySeasonOptionDto(
+            Integer seasonYear,
+            String seasonLabel
+    ) {
+    }
+
+    public record GameHistoryGameDto(
+            String source,
+            Integer seasonYear,
+            String seasonLabel,
+            String gameId,
+            LocalDate gameDate,
+            String gameType,
+            String league,
+            String teamFor,
+            String teamAgainst,
+            Integer goals,
+            Integer assists,
+            Integer points,
+            Integer pim
+    ) {
+    }
+
+    public record GameHistoryResponseDto(
+            String playerId,
+            String playerName,
+            Integer selectedSeasonYear,
+            String selectedSeasonLabel,
+            List<GameHistorySeasonOptionDto> availableSeasons,
+            List<GameHistoryGameDto> games,
+            OffsetDateTime fetchedAt,
+            String cacheControl
+    ) {
+    }
 }

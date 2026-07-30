@@ -68,18 +68,28 @@ def main() -> int:
     print("=" * 70)
 
     # ------------------------------------------------------------------ #
-    # Step 1: Discover leagues and teams                                   #
+    # Step 1: Discover leagues and teams (saves to CSV + DB)               #
     # ------------------------------------------------------------------ #
     print("\nStep 1: Discover leagues and teams...")
-    run([python, os.path.join(SCRIPT_DIR, "discover_teams.py"),
-         "--season", str(season_year)])
+    cmd_discover = [python, os.path.join(SCRIPT_DIR, "discover_teams.py"),
+                    "--season", str(season_year)]
+    if not args.dry_run:
+        cmd_discover += ["--host", args.host, "--port", str(args.port),
+                         "--dbname", args.dbname, "--user", args.user,
+                         "--password", args.password]
+    run(cmd_discover)
 
     # ------------------------------------------------------------------ #
-    # Step 2: Scrape rosters                                               #
+    # Step 2: Scrape rosters (reads teams from DB)                         #
     # ------------------------------------------------------------------ #
     print("\nStep 2: Scrape rosters for all teams...")
-    run([python, os.path.join(SCRIPT_DIR, "scrape_rosters.py"),
-         "--season", str(season_year)])
+    cmd_scrape = [python, os.path.join(SCRIPT_DIR, "scrape_rosters.py"),
+                  "--season", str(season_year)]
+    if not args.dry_run:
+        cmd_scrape += ["--host", args.host, "--port", str(args.port),
+                       "--dbname", args.dbname, "--user", args.user,
+                       "--password", args.password]
+    run(cmd_scrape)
 
     # ------------------------------------------------------------------ #
     # Step 3: Load rosters into the database                               #

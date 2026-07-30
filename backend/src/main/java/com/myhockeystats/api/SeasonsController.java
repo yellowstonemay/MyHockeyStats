@@ -8,6 +8,7 @@ import com.myhockeystats.security.JwtUtil;
 import com.myhockeystats.security.IntegrationAccessGuard;
 import com.myhockeystats.service.PlayerProfileService;
 import com.myhockeystats.service.integration.CareerLookupService;
+import com.myhockeystats.service.integration.GameHistoryLookupService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -47,6 +48,9 @@ public class SeasonsController {
 
     @Autowired
     private UserRepository userRepository;
+
+    @Autowired
+    private GameHistoryLookupService gameHistoryLookupService;
     
     /**
      * GET /api/players/{playerId}/seasons
@@ -172,6 +176,41 @@ public class SeasonsController {
             response.emptySources(),
             response.fetchedAt(),
             response.cacheControl()
+        );
+
+        return ResponseEntity.ok()
+            .cacheControl(CacheControl.maxAge(300, TimeUnit.SECONDS).cachePrivate())
+            .body(response);
+    }
+
+    @GetMapping("/me/game-history")
+    public ResponseEntity<?> getMyGameHistory(
+        @RequestHeader(value = "Authorization", required = false) String authHeader,
+        @RequestParam(value = "seasonYear", required = false) Integer seasonYear
+    ) {
+        String email = extractEmailFromAuthHeader(authHeader);
+        if (email == null) {
+            return ResponseEntity.status(401)
+                .body(new ErrorResponse("UNAUTHORIZED", "Authentication required."));
+        }
+
+        Optional<User> userOpt = userRepository.findByEmail(email);
+        if (userOpt.isEmpty()) {
+            return ResponseEntity.status(404)
+                .body(new ErrorResponse("USER_NOT_FOUND", "User not found."));
+        }
+
+        Optional<PlayerProfile> profileOpt = playerProfileService.getProfileByUserId(userOpt.get().getId());
+        if (profileOpt.isEmpty()) {
+            return ResponseEntity.status(404)
+                .body(new ErrorResponse("PLAYER_NOT_FOUND", "Player profile not found."));
+        }
+
+        PlayerProfile player = profileOpt.get();
+        IntegrationDtos.GameHistoryResponseDto response = gameHistoryLookupService.lookupByPlayerName(
+            String.valueOf(player.getId()),
+            player.getFullName(),
+            seasonYear
         );
 
         return ResponseEntity.ok()

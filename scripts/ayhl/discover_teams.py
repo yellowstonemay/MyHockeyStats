@@ -18,8 +18,22 @@ Usage:
 import argparse
 import csv
 import os
+import sys
 import time
 from playwright.sync_api import sync_playwright
+
+try:
+    from playwright_stealth import Stealth
+    _stealth = Stealth()
+    HAS_STEALTH = True
+except ImportError:
+    HAS_STEALTH = False
+
+try:
+    import psycopg2
+    HAS_PSYCOPG2 = True
+except ImportError:
+    HAS_PSYCOPG2 = False
 
 # Mapping from provided season year to site seasonid
 SEASON_TO_ID = {
@@ -48,6 +62,81 @@ SEASON_TO_ID = {
     2004: 10,
 }
 
+
+# ─── Database helpers ──────────────────────────────────────────────────────
+
+def ensure_teams_table(conn):
+    """Create ayhl_teams table if it doesn't exist."""
+    sql = """
+    CREATE TABLE IF NOT EXISTS ayhl_teams (
+        id              SERIAL PRIMARY KEY,
+        season_year     INTEGER NOT NULL,
+        seasonid        INTEGER NOT NULL,
+        leagueid        INTEGER NOT NULL,
+        league_name     VARCHAR(255) NOT NULL,
+        team_name       VARCHAR(255) NOT NULL,
+        team_params     VARCHAR(512),
+        created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+        UNIQUE (season_year, leagueid, team_name)
+    );
+    """
+    with conn.cursor() as cur:
+        cur.execute(sql)
+    conn.commit()
+
+
+def upsert_teams_to_db(conn, teams):
+    """Upsert league-team rows into ayhl_teams. Returns count."""
+    sql = """
+    INSERT INTO ayhl_teams (season_year, seasonid, leagueid, league_name, team_name, team_params)
+    VALUES (%s, %s, %s, %s, %s, %s)
+    ON CONFLICT (season_year, leagueid, team_name)
+    DO UPDATE SET
+        seasonid    = EXCLUDED.seasonid,
+        team_params = EXCLUDED.team_params,
+        updated_at  = NOW()
+    """
+    with conn.cursor() as cur:
+        for t in teams:
+            cur.execute(sql, (
+                t['season_year'], t['seasonid'], t['leagueid'],
+                t['league_name'], t['team_name'], t['team_params'],
+            ))
+    conn.commit()
+    return len(teams)
+
+
+def load_teams_from_db(conn, season_year):
+    """Load teams from ayhl_teams for a given season. Returns list of dicts."""
+    sql = """
+    SELECT season_year, seasonid, leagueid, league_name, team_name, team_params
+    FROM ayhl_teams
+    WHERE season_year = %s
+    ORDER BY league_name, team_name
+    """
+    with conn.cursor() as cur:
+        cur.execute(sql, (season_year,))
+        cols = [desc[0] for desc in cur.description]
+        return [dict(zip(cols, row)) for row in cur.fetchall()]
+
+
+def db_connect_from_args(args):
+    """Connect to PostgreSQL using parsed args (or return None)."""
+    if not HAS_PSYCOPG2:
+        return None
+    try:
+        return psycopg2.connect(
+            host=args.host, port=args.port,
+            dbname=args.dbname, user=args.user,
+            password=args.password,
+        )
+    except Exception as e:
+        print(f"  ⚠ DB connection failed: {e} (proceeding with CSV only)")
+        return None
+
+
+# ─── Discovery functions ───────────────────────────────────────────────────
 
 def discover_leagues_from_season(page, seasonid):
     """
@@ -98,13 +187,18 @@ def discover_leagues_from_season(page, seasonid):
 def discover_teams_from_league(page, league_params):
     """
     Discover all teams for a league by parsing the team dropdown.
+    Reuses the same page (navigates in-place) to preserve session & avoid Cloudflare.
     league_params is like: "?leagueid=279&leaguetypeid=2&seasonid=33"
     Returns list of dicts: [{'name': 'Team Name', 'params': '?seasonid=33&leaguetypeid=2&leagueid=281&teamid=3301'}, ...]
     """
     league_page_url = f"https://atlantichockey.org/teamroster.php{league_params}"
     
     try:
-        page.goto(league_page_url, timeout=15000)
+        page.goto(league_page_url, timeout=30000, wait_until='load')
+        # Wait for the select element itself
+        page.wait_for_selector('select[name="team"]', state='attached', timeout=15000)
+        # Small pause for JS to populate options
+        page.wait_for_timeout(3000)
     except Exception as e:
         print(f"Error loading league page: {e}")
         return []
@@ -114,15 +208,11 @@ def discover_teams_from_league(page, league_params):
     # Parse the team dropdown (select[name="team"])
     team_options = page.query_selector_all('select[name="team"] option')
     
-    for i, opt in enumerate(team_options):
-        # Skip the first option (default "- Teams-")
-        if i == 0:
-            continue
-        
+    for opt in team_options:
         opt_value = opt.get_attribute('value')
         opt_text = opt.inner_text().strip()
         
-        if not opt_value or not opt_text:
+        if not opt_value or not opt_text or 'teamid=' not in opt_value:
             continue
         
         teams.append({
@@ -138,6 +228,12 @@ def main():
     parser.add_argument('--season', type=int, required=True, help='Season year (e.g. 2025 for 2025-2026)')
     parser.add_argument('--delay', type=float, default=0.02, help='Delay between requests (seconds)')
     parser.add_argument('--sample', action='store_true', help='Sample mode (limit to 2 leagues, 3 teams each)')
+    # DB connection (optional — falls back to CSV-only if omitted)
+    parser.add_argument('--host', default=None, help='PostgreSQL host (skip = CSV only)')
+    parser.add_argument('--port', type=int, default=5432)
+    parser.add_argument('--dbname', default='myhockeystats')
+    parser.add_argument('--user', default='postgres')
+    parser.add_argument('--password', default='postgres')
     args = parser.parse_args()
 
     seasonid = SEASON_TO_ID.get(args.season)
@@ -152,8 +248,26 @@ def main():
     output_file = os.path.join(output_dir, f"{args.season}-ayhl-teams.csv")
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                '--disable-blink-features=AutomationControlled',
+                '--disable-dev-shm-usage',
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-web-security',
+                '--disable-features=IsolateOrigins,site-per-process',
+            ],
+        )
+        context = browser.new_context(
+            user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+            viewport={'width': 1280, 'height': 800},
+            locale='en-US',
+            timezone_id='America/New_York',
+        )
+        page = context.new_page()
+        if HAS_STEALTH:
+            _stealth.apply_stealth_sync(page)
 
         print(f"\n{'='*70}")
         print(f"PHASE 1: DISCOVER LEAGUES AND TEAMS")
@@ -171,12 +285,28 @@ def main():
             leagues = leagues[:2]
             print(f"Sample mode: limiting to first 2 leagues\n")
         
-        # Discover all teams
+        # Season page is no longer needed — close it and its context
+        page.close()
+        context.close()
+        
+        # Discover all teams (fresh context + page per league to avoid Cloudflare)
         league_team_list = []
         
         for league in leagues:
             print(f"  Discovering teams in '{league['name']}'...")
+            # Create a brand new context and page for each league
+            ctx = browser.new_context(
+                user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+                viewport={'width': 1280, 'height': 800},
+                locale='en-US',
+                timezone_id='America/New_York',
+            )
+            page = ctx.new_page()
+            if HAS_STEALTH:
+                _stealth.apply_stealth_sync(page)
             teams = discover_teams_from_league(page, league['params'])
+            page.close()
+            ctx.close()
             print(f"    Found {len(teams)} teams")
             
             if args.sample:
@@ -193,8 +323,8 @@ def main():
                     'team_params': team['params'],
                 })
             
-            # Polite delay between leagues
-            time.sleep(args.delay)
+            # Polite delay between leagues (longer to avoid Cloudflare rate limits)
+            time.sleep(max(args.delay, 3.0))
         
         print(f"\n✅ Discovery complete: {len(league_team_list)} league-team pairs found")
         
@@ -206,6 +336,21 @@ def main():
             writer.writeheader()
             writer.writerows(league_team_list)
         print(f"✅ Saved {len(league_team_list)} league-team pairs to '{output_file}'")
+
+        # Also save to database if DB args provided
+        if args.host:
+            conn = db_connect_from_args(args)
+            if conn:
+                try:
+                    ensure_teams_table(conn)
+                    count = upsert_teams_to_db(conn, league_team_list)
+                    print(f"✅ Upserted {count} teams into database (ayhl_teams)")
+                finally:
+                    conn.close()
+        else:
+            print(f"  ℹ  DB host not specified — teams saved to CSV only.")
+            print(f"     Pass --host <db_host> to also save to database.")
+
         print(f"\nNext step: Run 'python scrape_rosters.py --season {args.season}'")
         
         browser.close()

@@ -1,0 +1,16 @@
+services:
+  backend:
+    build: ./backend
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}
+      SPRING_DATASOURCE_USERNAME: ${DB_USERNAME}
+      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - '8080:8080'
+
+  frontend:
+    build: ./frontend/web
+    ports:
+      - '80:80'
+    depends_on:
+      - backend

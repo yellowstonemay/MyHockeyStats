@@ -2,83 +2,174 @@ import React, { useState, useEffect } from 'react'
 import { integrationsApi } from '../../lib/integrationsApi'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../Card'
 import { Button } from '../Button'
-import { AlertCircle, Loader2, RefreshCw } from 'lucide-react'
+import { AlertCircle, Loader2, RefreshCw, Download, FileText, X } from 'lucide-react'
 
 export default function SeasonsTab() {
-  const [records, setRecords] = useState([])
+  const [games, setGames] = useState([])
+  const [availableSeasons, setAvailableSeasons] = useState([])
   const [selectedSeason, setSelectedSeason] = useState('')
+  const [selectedGame, setSelectedGame] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [ambiguity, setAmbiguity] = useState(null)
 
   useEffect(() => {
-    loadSeasons()
+    loadGameHistory()
   }, [])
 
-  const loadSeasons = async () => {
+  const loadGameHistory = async (seasonYear = '') => {
     setLoading(true)
     setError('')
     try {
-      const response = await integrationsApi.fetchMySeasons(selectedSeason)
-      setRecords(response.records || [])
-      setAmbiguity(response.hasAmbiguity ? response.ambiguityNote : null)
+      const response = await integrationsApi.fetchMyGameHistory(seasonYear)
+      setGames(response.games || [])
+      setAvailableSeasons(response.availableSeasons || [])
+      setSelectedSeason(response.selectedSeasonYear ?? '')
     } catch (err) {
-      setError(err.message || 'Failed to load season data')
+      setError(err.message || 'Failed to load game history')
     } finally {
       setLoading(false)
     }
   }
 
   const handleSeasonChange = async (e) => {
-    const season = e.target.value
+    const season = e.target.value ? Number(e.target.value) : ''
     setSelectedSeason(season)
-    setLoading(true)
-    setError('')
-    try {
-      const response = await integrationsApi.fetchMySeasons(season)
-      setRecords(response.records || [])
-      setAmbiguity(response.hasAmbiguity ? response.ambiguityNote : null)
-    } catch (err) {
-      setError(err.message || 'Failed to load season data')
-    } finally {
-      setLoading(false)
-    }
+    await loadGameHistory(season)
   }
 
   const handleRetry = () => {
-    loadSeasons()
+    loadGameHistory(selectedSeason)
   }
 
-  // Group records by season
-  const recordsBySeason = {}
-  records.forEach((record) => {
-    const season = record.season
-    if (!recordsBySeason[season]) {
-      recordsBySeason[season] = []
-    }
-    recordsBySeason[season].push(record)
-  })
+  const selectedSeasonLabel = availableSeasons.find(
+    (season) => season.seasonYear === selectedSeason
+  )?.seasonLabel || 'Selected Season'
 
-  const seasons = Object.keys(recordsBySeason).sort((a, b) => b - a)
+  const downloadCsv = () => {
+    if (!games.length) return
+
+    const headers = [
+      'Date', 'Source', 'Game ID', 'Game Type', 'League',
+      'Team For', 'Team Against', 'Goals', 'Assists', 'Points', 'PIM'
+    ]
+
+    const escapeCsv = (value) => {
+      const text = value == null ? '' : String(value)
+      if (text.includes(',') || text.includes('"') || text.includes('\n')) {
+        return `"${text.replace(/"/g, '""')}"`
+      }
+      return text
+    }
+
+    const rows = games.map((g) => [
+      g.gameDate || '',
+      g.source || '',
+      g.gameId || '',
+      g.gameType || '',
+      g.league || '',
+      g.teamFor || '',
+      g.teamAgainst || '',
+      g.goals ?? 0,
+      g.assists ?? 0,
+      g.points ?? 0,
+      g.pim ?? 0,
+    ])
+
+    const csvContent = [
+      headers.join(','),
+      ...rows.map((row) => row.map(escapeCsv).join(',')),
+    ].join('\n')
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `game-history-${selectedSeason || 'season'}.csv`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  }
+
+  const downloadPdf = () => {
+    if (!games.length) return
+
+    const tableRows = games.map((g) => `
+      <tr>
+        <td>${g.gameDate || ''}</td>
+        <td>${g.source || ''}</td>
+        <td>${g.gameId || ''}</td>
+        <td>${g.teamFor || ''}</td>
+        <td>${g.teamAgainst || ''}</td>
+        <td style="text-align:right;">${g.goals ?? 0}</td>
+        <td style="text-align:right;">${g.assists ?? 0}</td>
+        <td style="text-align:right;">${g.points ?? 0}</td>
+        <td style="text-align:right;">${g.pim ?? 0}</td>
+      </tr>
+    `).join('')
+
+    const popup = window.open('', '_blank')
+    if (!popup) return
+
+    popup.document.write(`
+      <html>
+        <head>
+          <title>Game History ${selectedSeasonLabel}</title>
+          <style>
+            body { font-family: Arial, sans-serif; margin: 24px; color: #0f172a; }
+            h1 { margin: 0 0 8px; font-size: 20px; }
+            p { margin: 0 0 16px; color: #475569; }
+            table { width: 100%; border-collapse: collapse; font-size: 12px; }
+            th, td { border: 1px solid #cbd5e1; padding: 6px; }
+            th { background: #f1f5f9; text-align: left; }
+          </style>
+        </head>
+        <body>
+          <h1>Game History</h1>
+          <p>${selectedSeasonLabel}</p>
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Source</th>
+                <th>Game ID</th>
+                <th>Team</th>
+                <th>Opponent</th>
+                <th>G</th>
+                <th>A</th>
+                <th>P</th>
+                <th>PIM</th>
+              </tr>
+            </thead>
+            <tbody>${tableRows}</tbody>
+          </table>
+        </body>
+      </html>
+    `)
+    popup.document.close()
+    popup.focus()
+    popup.print()
+  }
+
+  const totals = games.reduce(
+    (acc, g) => ({
+      games: acc.games + 1,
+      goals: acc.goals + (g.goals ?? 0),
+      assists: acc.assists + (g.assists ?? 0),
+      points: acc.points + (g.points ?? 0),
+    }),
+    { games: 0, goals: 0, assists: 0, points: 0 }
+  )
 
   return (
     <Card>
       <CardHeader>
         <CardTitle>Game History & Career Statistics</CardTitle>
         <CardDescription>
-          View your complete game history and career statistics from all hockey leagues
+          View per-game history across AYHL, THF, and AHF for the selected season
         </CardDescription>
       </CardHeader>
       <CardContent>
-        {ambiguity && (
-          <div className="p-3 bg-yellow-100 border border-yellow-400 text-yellow-800 rounded-md mb-6 flex items-start gap-2 text-sm">
-            <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
-            <div>
-              <strong>Note:</strong> {ambiguity}
-            </div>
-          </div>
-        )}
-
         {error && (
           <div className="p-4 bg-red-100 border border-red-400 text-red-700 rounded-md mb-6">
             <div className="flex items-center justify-between">
@@ -102,112 +193,140 @@ export default function SeasonsTab() {
         {loading && (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="w-6 h-6 animate-spin text-primary-600">
-              <span className="ml-2">Loading career data...</span>
+              <span className="ml-2">Loading game history...</span>
             </Loader2>
           </div>
         )}
 
-        {!loading && records.length === 0 && !error && (
-          <div className="text-center py-8 text-slate-500">
-            <p>No career records found for your profile.</p>
-            <p className="text-sm mt-1">Your data will appear here once it matches hockey league records.</p>
+        {!loading && availableSeasons.length > 0 && (
+          <div className="mb-6 flex flex-col md:flex-row md:items-end gap-3">
+            <div className="flex-1">
+              <label className="label">Season</label>
+              <select
+                value={selectedSeason}
+                onChange={handleSeasonChange}
+                className="input appearance-none"
+              >
+                {availableSeasons.map((season) => (
+                  <option key={season.seasonYear} value={season.seasonYear}>
+                    {season.seasonLabel}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={downloadCsv} disabled={!games.length}>
+                <Download className="w-4 h-4 mr-2" />
+                Export CSV
+              </Button>
+              <Button variant="outline" onClick={downloadPdf} disabled={!games.length}>
+                <FileText className="w-4 h-4 mr-2" />
+                Export PDF
+              </Button>
+            </div>
           </div>
         )}
 
-        {!loading && records.length > 0 && (
+        {!loading && games.length === 0 && !error && (
+          <div className="text-center py-8 text-slate-500">
+            <p>No game records found for this season.</p>
+            <p className="text-sm mt-1">Game history will appear once per-game data exists for your profile name.</p>
+          </div>
+        )}
+
+        {!loading && games.length > 0 && (
           <>
-            {seasons.length > 1 && (
-              <div className="mb-6">
-                <label className="label">Filter by Season</label>
-                <select
-                  value={selectedSeason}
-                  onChange={handleSeasonChange}
-                  className="input appearance-none"
-                >
-                  <option value="">All Seasons</option>
-                  {Array.from(seasons)
-                    .sort((a, b) => b - a)
-                    .map((season) => (
-                      <option key={season} value={season}>
-                        {season} Season
-                      </option>
-                    ))}
-                </select>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+              <div className="p-3 rounded-lg bg-slate-100">
+                <p className="text-xs text-slate-600">Games</p>
+                <p className="text-lg font-semibold">{totals.games}</p>
+              </div>
+              <div className="p-3 rounded-lg bg-slate-100">
+                <p className="text-xs text-slate-600">Goals</p>
+                <p className="text-lg font-semibold">{totals.goals}</p>
+              </div>
+              <div className="p-3 rounded-lg bg-slate-100">
+                <p className="text-xs text-slate-600">Assists</p>
+                <p className="text-lg font-semibold">{totals.assists}</p>
+              </div>
+              <div className="p-3 rounded-lg bg-primary-50 border border-primary-100">
+                <p className="text-xs text-primary-700">Points</p>
+                <p className="text-lg font-semibold text-primary-700">{totals.points}</p>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto border border-slate-200 rounded-lg">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-100">
+                  <tr>
+                    <th className="text-left px-3 py-2">Date</th>
+                    <th className="text-left px-3 py-2">Source</th>
+                    <th className="text-left px-3 py-2">Game ID</th>
+                    <th className="text-left px-3 py-2">Team</th>
+                    <th className="text-left px-3 py-2">Opponent</th>
+                    <th className="text-right px-3 py-2">G</th>
+                    <th className="text-right px-3 py-2">A</th>
+                    <th className="text-right px-3 py-2">P</th>
+                    <th className="text-right px-3 py-2">PIM</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {games.map((game, idx) => (
+                    <tr
+                      key={`${game.source}-${game.gameId}-${idx}`}
+                      className="border-t border-slate-200 hover:bg-slate-50 cursor-pointer"
+                      onClick={() => setSelectedGame(game)}
+                    >
+                      <td className="px-3 py-2">{game.gameDate || '—'}</td>
+                      <td className="px-3 py-2 font-medium">{game.source}</td>
+                      <td className="px-3 py-2">{game.gameId || '—'}</td>
+                      <td className="px-3 py-2">{game.teamFor || '—'}</td>
+                      <td className="px-3 py-2">{game.teamAgainst || '—'}</td>
+                      <td className="px-3 py-2 text-right">{game.goals ?? 0}</td>
+                      <td className="px-3 py-2 text-right">{game.assists ?? 0}</td>
+                      <td className="px-3 py-2 text-right font-semibold text-primary-700">{game.points ?? 0}</td>
+                      <td className="px-3 py-2 text-right">{game.pim ?? 0}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {selectedGame && (
+              <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+                <div className="bg-white rounded-lg w-full max-w-2xl shadow-xl border border-slate-200">
+                  <div className="flex items-center justify-between border-b border-slate-200 p-4">
+                    <h3 className="text-lg font-semibold text-slate-900">Game Details</h3>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedGame(null)}
+                      className="text-slate-500 hover:text-slate-800"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+                  <div className="p-4 grid grid-cols-2 gap-4 text-sm">
+                    <div><p className="text-slate-500">Date</p><p className="font-medium">{selectedGame.gameDate || '—'}</p></div>
+                    <div><p className="text-slate-500">Source</p><p className="font-medium">{selectedGame.source || '—'}</p></div>
+                    <div><p className="text-slate-500">Game ID</p><p className="font-medium">{selectedGame.gameId || '—'}</p></div>
+                    <div><p className="text-slate-500">Game Type</p><p className="font-medium">{selectedGame.gameType || '—'}</p></div>
+                    <div><p className="text-slate-500">League</p><p className="font-medium">{selectedGame.league || '—'}</p></div>
+                    <div><p className="text-slate-500">Season</p><p className="font-medium">{selectedGame.seasonLabel || '—'}</p></div>
+                    <div><p className="text-slate-500">Team</p><p className="font-medium">{selectedGame.teamFor || '—'}</p></div>
+                    <div><p className="text-slate-500">Opponent</p><p className="font-medium">{selectedGame.teamAgainst || '—'}</p></div>
+                    <div><p className="text-slate-500">Goals</p><p className="font-medium">{selectedGame.goals ?? 0}</p></div>
+                    <div><p className="text-slate-500">Assists</p><p className="font-medium">{selectedGame.assists ?? 0}</p></div>
+                    <div><p className="text-slate-500">Points</p><p className="font-medium text-primary-700">{selectedGame.points ?? 0}</p></div>
+                    <div><p className="text-slate-500">PIM</p><p className="font-medium">{selectedGame.pim ?? 0}</p></div>
+                  </div>
+                  <div className="border-t border-slate-200 p-4 flex justify-end">
+                    <Button variant="outline" onClick={() => setSelectedGame(null)}>
+                      Close
+                    </Button>
+                  </div>
+                </div>
               </div>
             )}
-
-            <div className="space-y-6">
-              {seasons
-                .sort((a, b) => b - a)
-                .map((season) => (
-                  <div key={season}>
-                    <h3 className="text-lg font-semibold mb-3">
-                      {season} Season ({recordsBySeason[season].length} record
-                      {recordsBySeason[season].length > 1 ? 's' : ''})
-                    </h3>
-                    <div className="space-y-3">
-                      {recordsBySeason[season]
-                        .sort((a, b) => {
-                          // Sort by source for consistent display
-                          return (a.source || '').localeCompare(b.source || '')
-                        })
-                        .map((record, idx) => (
-                          <div
-                            key={`${record.source}-${record.sourcePlayerId}-${idx}`}
-                            className="border border-slate-200 rounded-lg p-4 hover:bg-slate-50 transition-colors"
-                          >
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                              <div>
-                                <p className="text-xs text-slate-600 mb-1">League</p>
-                                <p className="font-semibold text-sm">{record.source}</p>
-                              </div>
-                              <div>
-                                <p className="text-xs text-slate-600 mb-1">Club</p>
-                                <p className="text-sm">{record.club || '—'}</p>
-                              </div>
-                              <div>
-                                <p className="text-xs text-slate-600 mb-1">Team</p>
-                                <p className="text-sm">{record.team || '—'}</p>
-                              </div>
-                              <div>
-                                <p className="text-xs text-slate-600 mb-1">Jersey #</p>
-                                <p className="text-sm">{record.jerseyNumber || '—'}</p>
-                              </div>
-
-                              <div>
-                                <p className="text-xs text-slate-600 mb-1">Games Played</p>
-                                <p className="font-semibold text-sm">{record.gamesPlayed || 0}</p>
-                              </div>
-                              <div>
-                                <p className="text-xs text-slate-600 mb-1">Goals</p>
-                                <p className="font-semibold text-sm">{record.goals || 0}</p>
-                              </div>
-                              <div>
-                                <p className="text-xs text-slate-600 mb-1">Assists</p>
-                                <p className="font-semibold text-sm">{record.assists || 0}</p>
-                              </div>
-                              <div>
-                                <p className="text-xs text-slate-600 mb-1">Points</p>
-                                <p className="font-semibold text-sm text-primary-600">
-                                  {record.points || 0}
-                                </p>
-                              </div>
-
-                              <div>
-                                <p className="text-xs text-slate-600 mb-1">Penalties</p>
-                                <p className="text-sm">{record.penalties || 0}</p>
-                              </div>
-                              <div>
-                                <p className="text-xs text-slate-600 mb-1">PIM</p>
-                                <p className="text-sm">{record.pim || 0}</p>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                    </div>
-                  </div>
-                ))}
-            </div>
           </>
         )}
       </CardContent>

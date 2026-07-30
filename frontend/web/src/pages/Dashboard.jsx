@@ -3,6 +3,7 @@ import { Button } from '../components/Button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/Card'
 import { AlertCircle, Loader2, RefreshCw } from 'lucide-react'
 import { integrationsApi } from '../lib/integrationsApi'
+import SeasonsTab from '../components/PlayerProfile/SeasonsTab'
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState('overview')
@@ -297,17 +298,7 @@ export default function Dashboard() {
             )}
 
             {activeTab === 'games' && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Game History</CardTitle>
-                  <CardDescription>All your games across all seasons</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-slate-600 text-center py-8">
-                    No games recorded yet. Start tracking your performance!
-                  </p>
-                </CardContent>
-              </Card>
+              <SeasonsTab />
             )}
 
             {activeTab === 'stats' && (

@@ -27,7 +27,41 @@ PHASE 2: SCRAPING (scrape_rosters.py)
 USAGE WORKFLOW
 ================================================================================
 
-1. PHASE 1: Discover leagues and teams (one time per season)
+The teams list can come from either the database (ayhl_teams table) or a CSV file.
+On the Mac mini with --host provided, the DB is preferred — CSV is the fallback.
+
+── Option A: With Database (recommended for Mac mini / production) ──
+
+1. PHASE 1: Discover and save to DB + CSV
+   
+   python discover_teams.py --season 2025 --host localhost
+   
+   This will:
+   - Connect to atlantichockey.org and discover leagues & teams
+   - Save teams to: data/teams/2025-ayhl-teams.csv
+   - Also save teams to the ayhl_teams database table 🆕
+
+2. PHASE 2: Scrape rosters (reads teams from DB)
+   
+   python scrape_rosters.py --season 2025 --host localhost
+   
+   This will:
+   - Load teams from the ayhl_teams database table
+   - For each team, scrape the roster page
+   - Save player records to: data/rosters/2025-ayhl-rosters.csv
+   - (falls back to CSV if no DB connection)
+
+3. PHASE 3: Load rosters into database
+   
+   python load_rosters_to_db.py --host localhost
+   
+   This will:
+   - Read the latest roster CSV
+   - Upsert players into the ayhl_roster table
+
+── Option B: CSV Only (no database required) ──
+
+1. PHASE 1: Discover leagues and teams
    
    cd scripts/ayhl
    python discover_teams.py --season 2025
@@ -36,22 +70,28 @@ USAGE WORKFLOW
    - Connect to atlantichockey.org
    - Parse the league dropdown on the season page
    - For each league, parse the team dropdown
-   - Save all league-team pairs to: 2025-ayhl-teams.csv
+   - Save all league-team pairs to: data/teams/2025-ayhl-teams.csv
 
-2. PHASE 2: Scrape rosters (can run multiple times)
+2. PHASE 2: Scrape rosters
    
-   python scrape_rosters.py 2025-ayhl-teams.csv
+   python scrape_rosters.py data/teams/2025-ayhl-teams.csv
    
    This will:
-   - Read the team list from the specified file (2025-ayhl-teams.csv)
+   - Read the team list from the specified CSV file
    - For each team, navigate to the roster page and extract player data
-   - Save all player records to: 2025-ayhl-rosters.csv (inferred from the input file name)
+   - Save all player records to: data/rosters/2025-ayhl-rosters.csv
 
 3. INSPECT & ITERATE
    
-   You can edit 2025-ayhl-teams.csv to remove teams, then re-run Phase 2:
+   You can edit the teams CSV to remove teams, then re-run Phase 2:
    
-   python scrape_rosters.py 2025-ayhl-teams.csv
+   python scrape_rosters.py data/teams/2025-ayhl-teams.csv
+
+── One-Step Weekly Update ──
+
+   python weekly_update.py --host localhost --dbname myhockeystats --user postgres --password postgres
+   
+   This runs all three phases in sequence (discover → scrape → load).
 
 ================================================================================
 SAMPLE MODE (Testing/Debugging)
@@ -79,12 +119,23 @@ discover_teams.py:
   --season YEAR         Season year (e.g., 2025 for 2025-2026 season) [REQUIRED]
   --delay SECONDS       Delay between requests in seconds (default: 0.02)
   --sample              Sample mode: limit to 2 leagues, 3 teams each
+  --host HOST           PostgreSQL host (optional — saves teams to DB if provided)
+  --port PORT           PostgreSQL port (default: 5432)
+  --dbname DB           Database name (default: myhockeystats)
+  --user USER           DB username (default: postgres)
+  --password PASSWORD   DB password (default: postgres)
   --help                Show help message
 
 scrape_rosters.py:
-  input_file            Input CSV file with discovered teams (e.g., "2025-ayhl-teams.csv") [REQUIRED]
-  --output FILE         Output CSV file for rosters (default: auto-generated from input file name)
-  --delay SECONDS       Delay between requests in seconds (default: 0.02)
+  input_file            Input CSV file (optional if --season + --host provided)
+  --season YEAR         Season year (e.g., 2025) to read teams from DB
+  --output FILE         Output CSV file for rosters (default: auto-generated)
+  --delay SECONDS       Delay between requests in seconds (default: 0.1)
+  --host HOST           PostgreSQL host (optional — reads teams from DB if provided)
+  --port PORT           PostgreSQL port (default: 5432)
+  --dbname DB           Database name (default: myhockeystats)
+  --user USER           DB username (default: postgres)
+  --password PASSWORD   DB password (default: postgres)
   --help                Show help message
 
 ================================================================================
