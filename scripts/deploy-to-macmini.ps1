@@ -12,7 +12,12 @@
     SSH user for the Mac mini (default: ethan-macmini).
 
 .PARAMETER MacHost
-    Hostname/IP of the Mac mini (default: 192.168.1.156).
+    Hostname/IP of the Mac mini (default: home LAN 192.168.1.156).
+    Use -Tailscale to connect from outside your home network.
+
+.PARAMETER Tailscale
+    Use the Tailscale IP (100.112.42.3) instead of the home LAN IP.
+    Only use when away from home (Tailscale has a free minute quota).
 
 .PARAMETER MacPath
     Remote project directory on the Mac mini (default: ~/hockey-server).
@@ -25,6 +30,11 @@
 
 .EXAMPLE
     .\scripts\deploy-to-macmini.ps1
+    # At home: uses 192.168.1.156 (LAN)
+
+.EXAMPLE
+    .\scripts\deploy-to-macmini.ps1 -Tailscale
+    # Away from home: uses 100.112.42.3 (Tailscale VPN)
 
 .EXAMPLE
     .\scripts\deploy-to-macmini.ps1 -SetupTunnel
@@ -32,11 +42,18 @@
 
 param(
     [string]$MacUser = "ethan-macmini",
-    [string]$MacHost = "192.168.1.156",
+    [string]$MacHost = "192.168.1.156",  # home LAN IP (default)
     [string]$MacPath = "~/hockey-server",
     [switch]$SkipBuild,
-    [switch]$SetupTunnel
+    [switch]$SetupTunnel,
+    [switch]$Tailscale
 )
+
+# Use Tailscale IP only when explicitly requested (away from home)
+if ($Tailscale) {
+    $MacHost = "100.112.42.3"
+    Write-Host "  🌐 Using Tailscale IP ($MacHost) - for remote access" -ForegroundColor Magenta
+}
 
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Resolve-Path "$PSScriptRoot\.."

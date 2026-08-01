@@ -35,7 +35,12 @@ public class SecurityConfig {
     @Bean
     public org.springframework.web.cors.CorsConfigurationSource corsConfigurationSource() {
         org.springframework.web.cors.CorsConfiguration config = new org.springframework.web.cors.CorsConfiguration();
-        config.setAllowedOrigins(java.util.List.of("http://localhost", "http://localhost:80", "http://localhost:5173"));
+        // Local dev + production domain (youthhockeystats.us served via Cloudflare Tunnel)
+        String allowedOrigins = System.getenv().getOrDefault(
+            "CORS_ALLOWED_ORIGINS",
+            "http://localhost,http://localhost:80,http://localhost:5173,https://youthhockeystats.us,https://www.youthhockeystats.us"
+        );
+        config.setAllowedOrigins(java.util.Arrays.asList(allowedOrigins.split(",")));
         config.setAllowedMethods(java.util.List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(java.util.List.of("*"));
         config.setAllowCredentials(true);

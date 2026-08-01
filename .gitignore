@@ -1,5 +1,6 @@
 # Java
 /target/
+**/target/
 /.mvn/
 build/
 *.class
@@ -11,6 +12,17 @@ build/
 /scripts/thf-js/node_modules/
 *.log
 .env*
+
+# Python venv
+scripts/deep_dive/.venv/
+__pycache__/
+
+# Deployment artifacts
+*.tar.gz
+
+# Scraped binary / progress state
+scripts/thf-js/data/scoresheet/
+scripts/ayhl/data/player_games/
 
 # OS
 .DS_Store

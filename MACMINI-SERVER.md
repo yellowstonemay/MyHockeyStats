@@ -398,3 +398,39 @@ chmod +x ~/hockey-server/scripts/*.sh
 | `config.yml` | Cloudflare tunnel config |
 | `logs/` | Scraping pipeline logs |
 | `backend/`, `frontend/`, `scripts/` | Deployed source code |
+
+---
+
+## 10. Remote Access — Tailscale (only when away from home) 🌐
+
+> ⚠️ **Important:** Tailscale has a **free minute quota per month**, so **only use it when NOT at home**. At home, always use the LAN IP `192.168.1.156`.
+
+Tailscale creates a private VPN so you can SSH in from anywhere (hotels, airports, travel).
+
+**Tailscale IPs:**
+| Machine | Tailscale IP |
+|---------|-------------|
+| **Mac mini** | `100.112.42.3` |
+| **Windows laptop** | `100.91.237.39` |
+
+**When away from home (travel):**
+```powershell
+# SSH:
+ssh ethan-macmini@100.112.42.3
+
+# Deploy:
+.\scripts\deploy-to-macmini.ps1 -Tailscale
+```
+
+**When at home (default — no Tailscale needed):**
+```powershell
+# SSH:
+ssh ethan-macmini@192.168.1.156
+
+# Deploy:
+.\scripts\deploy-to-macmini.ps1
+```
+
+Both machines must have Tailscale installed and logged into the same account:
+- [Tailscale for macOS](https://tailscale.com/download/mac)
+- [Tailscale for Windows](https://tailscale.com/download/windows)

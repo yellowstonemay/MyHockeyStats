@@ -1,8 +1,16 @@
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+puppeteer.use(StealthPlugin());
 const fs = require('fs');
 const path = require('path');
 const { Pool } = require('pg');
 const { parse } = require('csv-parse/sync');
+
+// THF/AHF season year -> TimeToScore season ID (from the schedule page Season dropdown)
+const SEASON_TO_ID = {
+    '2026': 190,
+    '2025': 131
+};
 
 const CSV_COLUMNS = [
     'TEAM_ID',
@@ -28,8 +36,27 @@ const pool = new Pool({
     database: process.env.DB_NAME || 'myhockeystats',
     user: process.env.DB_USER || 'postgres',
     password: process.env.DB_PASSWORD || 'postgres',
+    connectionTimeoutMillis: 30000,
+    idleTimeoutMillis: 60000,
+    max: 5,
     allowExitOnIdle: true
 });
+
+// Retry a DB operation a few times to ride out transient connection drops
+async function withRetry(fn, attempts = 4, delayMs = 3000) {
+    let lastErr;
+    for (let i = 0; i < attempts; i++) {
+        try {
+            return await fn();
+        } catch (err) {
+            lastErr = err;
+            console.error(`DB op failed (attempt ${i + 1}/${attempts}): ${err.message}. Retrying in ${delayMs}ms...`);
+            await new Promise((r) => setTimeout(r, delayMs));
+            delayMs *= 2;
+        }
+    }
+    throw lastErr;
+}
 
 function toInt(value, fallback = 0) {
     const n = Number.parseInt(String(value ?? '').trim(), 10);
@@ -82,6 +109,7 @@ async function upsertTeamRecordsToDb(settings, seasonYear, teamRecords) {
         return;
     }
 
+    return withRetry(async () => {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
@@ -133,11 +161,12 @@ async function upsertTeamRecordsToDb(settings, seasonYear, teamRecords) {
 
         await client.query('COMMIT');
     } catch (err) {
-        await client.query('ROLLBACK');
+        try { await client.query('ROLLBACK'); } catch (_) { /* ignore */ }
         throw err;
     } finally {
         client.release();
     }
+    });
 }
 
 function escapeCsvValue(value) {
@@ -181,15 +210,15 @@ function appendRecordsToCsv(outputPath, records) {
     fs.appendFileSync(outputPath, `${lines.join('\n')}\n`, 'utf8');
 }
 
-function buildQueueFromTeams(teams, baseUrl) {
+function buildQueueFromTeams(teams, baseUrl, seasonId) {
     return teams.map((t) => ({
-        url: `${baseUrl}${t.team_id}&tab=3`,
+        url: `${baseUrl}${t.team_id}&season=${seasonId}&tab=roster`,
         team_id: t.team_id,
         team_name: t.team_name
     }));
 }
 
-function loadFailedTeamQueue(failedPath, baseUrl) {
+function loadFailedTeamQueue(failedPath, baseUrl, seasonId) {
     if (!fs.existsSync(failedPath)) {
         return [];
     }
@@ -209,7 +238,7 @@ function loadFailedTeamQueue(failedPath, baseUrl) {
 
         const teamName = String(row.team_name || '').trim() || `Team ${teamId}`;
         uniqueByTeamId.set(teamId, {
-            url: `${baseUrl}${teamId}&tab=3`,
+            url: `${baseUrl}${teamId}&season=${seasonId}&tab=roster`,
             team_id: teamId,
             team_name: teamName
         });
@@ -279,14 +308,16 @@ async function scrapeRosters(league, seasonYear, options = {}) {
             outputCsv: `${seasonYear}-thf-rosters.csv`,
             baseUrl: 'https://www.tier1hockeyfederation.com/team-pages/?team=',
             leagueCode: 'THF',
-            rosterTable: 'thf_rosters'
+            rosterTable: 'thf_rosters',
+            seasonId: SEASON_TO_ID[String(seasonYear)] || null
         },
         ahf: {
             inputCsv: `data/${seasonYear}-ahf-teams.csv`,
             outputCsv: `${seasonYear}-ahf-rosters.csv`,
-            baseUrl: 'https://atlantichockeyfederation.com/team-page/?team=', // Ensure this URL structure is correct for AHF
+            baseUrl: 'https://atlantichockeyfederation.com/team-page/?team=',
             leagueCode: 'AHF',
-            rosterTable: 'ahf_rosters'
+            rosterTable: 'ahf_rosters',
+            seasonId: SEASON_TO_ID[String(seasonYear)] || null
         }
     };
 
@@ -315,7 +346,7 @@ async function scrapeRosters(league, seasonYear, options = {}) {
 
     let queue = [];
     if (failedOnly) {
-        queue = loadFailedTeamQueue(failedPath, settings.baseUrl);
+        queue = loadFailedTeamQueue(failedPath, settings.baseUrl, settings.seasonId);
         if (queue.length === 0) {
             console.log(`No failed teams found in ${failedPath}. Nothing to re-scan.`);
             return;
@@ -325,7 +356,7 @@ async function scrapeRosters(league, seasonYear, options = {}) {
         // 1. Read teams
         const csvContent = fs.readFileSync(path.join(__dirname, settings.inputCsv), 'utf8');
         const teams = parse(csvContent, { columns: true, skip_empty_lines: true });
-        queue = buildQueueFromTeams(teams, settings.baseUrl);
+        queue = buildQueueFromTeams(teams, settings.baseUrl, settings.seasonId);
 
         if (resume) {
             const lastTeamId = getLastTeamIdFromOutput(outputPath);
@@ -349,7 +380,10 @@ async function scrapeRosters(league, seasonYear, options = {}) {
 
     await ensureTables(settings);
 
-    const browser = await puppeteer.launch({ headless: true });
+    const browser = await puppeteer.launch({
+        headless: true,
+        args: ['--disable-blink-features=AutomationControlled', '--no-sandbox']
+    });
 
     try {
 
@@ -371,6 +405,7 @@ async function scrapeRosters(league, seasonYear, options = {}) {
         } = options;
 
         const page = await browser.newPage();
+        await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36');
         console.log(`Scraping: ${team.team_name} ${isRetry ? '(Retry)' : ''}`);
 
         try {
@@ -385,7 +420,7 @@ async function scrapeRosters(league, seasonYear, options = {}) {
             await new Promise(r => setTimeout(r, 2000)); 
 
             // 3. Navigate with a longer overall page timeout
-            await page.goto(team.url, { waitUntil: 'networkidle0', timeout: pageTimeoutMs });
+            await page.goto(team.url, { waitUntil: 'domcontentloaded', timeout: pageTimeoutMs });
 
             const response = await rosterPromise;
             const data = await response.json();
@@ -402,7 +437,7 @@ async function scrapeRosters(league, seasonYear, options = {}) {
                     player_id: p.player_id || p.id || 'N/A',
                     name: p.player_name || 'N/A',
                     jersey: p.jersey || '0',
-                    position: p.position || 'N/A',
+                    position: p.position || p.plays || 'N/A',
                     birthdate,
                     gp: toInt(p.games_played),
                     goals: toInt(p.goals),

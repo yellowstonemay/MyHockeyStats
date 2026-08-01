@@ -1,0 +1,602 @@
+season_year,team_id,team_name
+2026,10766,Ashburn Rebels 8AA-1
+2026,9686,Ashburn Xtreme 10AA
+2026,9688,Ashburn Xtreme 11AA
+2026,9689,Ashburn Xtreme 12AA
+2026,9691,Ashburn Xtreme 13AA
+2026,9692,Ashburn Xtreme 14AA
+2026,9693,Ashburn Xtreme 14GRY
+2026,9684,Ashburn Xtreme 16AA-1
+2026,9685,Ashburn Xtreme 16AA-2
+2026,9694,Ashburn Xtreme 16L
+2026,9696,Ashburn Xtreme 18GRY
+2026,15021,Blazers 10AA
+2026,14928,Blazers 10GRY
+2026,15018,Blazers 10M
+2026,9997,Blazers 11AA
+2026,9998,Blazers 12AA
+2026,9999,Blazers 12L
+2026,10000,Blazers 12M
+2026,10001,Blazers 13AA
+2026,10002,Blazers 14AA
+2026,15054,Blazers 14GRY
+2026,10003,Blazers 14L
+2026,15082,Blazers 15AA
+2026,10005,Blazers 16AA
+2026,10006,Blazers 16GRY
+2026,15113,Blazers 16L
+2026,10007,Blazers 18AA Black
+2026,15122,Blazers 18AA Orange
+2026,10008,Blazers 18GRY
+2026,10760,Blazers 8U BEG
+2026,15478,Blazers 8U INT
+2026,10009,Blazers 9AA
+2026,9703,Bridge 8AAA 2018
+2026,9702,Bridge 8AAA Elite
+2026,13865,Central PA Lancers 8AA
+2026,9709,Darien 11AA
+2026,10551,Delaware Delaware Ducks 8U BEG Goodenough
+2026,10549,Delaware Delaware Ducks 8U BEG Mulvena
+2026,9714,Delaware Ducks 10GRY
+2026,9716,Delaware Ducks 10M
+2026,9717,Delaware Ducks 11AA
+2026,9718,Delaware Ducks 12AA
+2026,15024,Delaware Ducks 12L
+2026,9721,Delaware Ducks 13AA
+2026,15044,Delaware Ducks 14AA
+2026,15065,Delaware Ducks 14L
+2026,15104,Delaware Ducks 16GRY
+2026,15114,Delaware Ducks 16L
+2026,15502,Delaware Ducks 6U
+2026,10552,Delaware Ducks 8U INT
+2026,15140,Delaware Ducks 9AA
+2026,14929,Frederick Freeze 10GRY
+2026,15322,Frederick Freeze 10L
+2026,14961,Frederick Freeze 11AA
+2026,15031,Frederick Freeze 13AA
+2026,14922,Genesis Hockey Club 10AA
+2026,14936,Genesis Hockey Club 10L
+2026,14947,Genesis Hockey Club 10M
+2026,14970,Genesis Hockey Club 12AA McGinty
+2026,14971,Genesis Hockey Club 12AA Ruina
+2026,14978,Genesis Hockey Club 12GRY
+2026,15009,Genesis Hockey Club 12L
+2026,15010,Genesis Hockey Club 12M
+2026,15032,Genesis Hockey Club 13AA
+2026,15041,Genesis Hockey Club 14AA
+2026,15055,Genesis Hockey Club 14GRY
+2026,15076,Genesis Hockey Club 14M
+2026,15085,Genesis Hockey Club 15AA
+2026,15092,Genesis Hockey Club 16AA
+2026,15105,Genesis Hockey Club 16GRY
+2026,15115,Genesis Hockey Club 16L
+2026,15123,Genesis Hockey Club 18AA
+2026,15133,Genesis Hockey Club 18GRY
+2026,15472,Genesis Hockey Club 8U ADV
+2026,15496,Genesis Hockey Club 8U BEG
+2026,15479,Genesis Hockey Club 8U INT Blue
+2026,15480,Genesis Hockey Club 8U INT Gray
+2026,15141,Genesis Hockey Club 9AA
+2026,15066,Genesis Hockey Club14L
+2026,15516,Hard Edge Hockey 8AA
+2026,15020,Hartford Jr Wolfpack 12G
+2026,15400,Hartford Jr Wolfpack 8AA
+2026,10553,Haverford Haverford Hawks 8U ADV
+2026,10555,Haverford Haverford Hawks 8U BEG Gold
+2026,10556,Haverford Haverford Hawks 8U BEG White
+2026,9742,Haverford Hawks 10AA
+2026,9743,Haverford Hawks 10L
+2026,9744,Haverford Hawks 10M
+2026,9745,Haverford Hawks 12AA
+2026,9746,Haverford Hawks 12L
+2026,9747,Haverford Hawks 12M
+2026,9748,Haverford Hawks 13AA
+2026,9749,Haverford Hawks 14AA
+2026,9750,Haverford Hawks 14L
+2026,9751,Haverford Hawks 15AA
+2026,11539,Haverford Hawks 16AA
+2026,9752,Haverford Hawks 16GRY
+2026,9754,Haverford Hawks 18AA
+2026,10554,Haverford Hawks 8U INT
+2026,10558,Hollydell Hollydell Hurricanes 8U ADV
+2026,9756,Hollydell Hurricanes 10AA
+2026,14937,Hollydell Hurricanes 10L
+2026,9759,Hollydell Hurricanes 11AA
+2026,9760,Hollydell Hurricanes 12AA
+2026,9761,Hollydell Hurricanes 12GRY
+2026,9762,Hollydell Hurricanes 12L
+2026,9763,Hollydell Hurricanes 12M
+2026,9764,Hollydell Hurricanes 13AA
+2026,9765,Hollydell Hurricanes 14AA
+2026,9766,Hollydell Hurricanes 14GRY
+2026,9767,Hollydell Hurricanes 14L
+2026,15077,Hollydell Hurricanes 14M
+2026,9768,Hollydell Hurricanes 15AA
+2026,9769,Hollydell Hurricanes 16AA
+2026,9770,Hollydell Hurricanes 16GRY
+2026,15116,Hollydell Hurricanes 16L
+2026,9772,Hollydell Hurricanes 18AA
+2026,15507,Hollydell Hurricanes 6U
+2026,10559,Hollydell Hurricanes 8U INT
+2026,10557,Hollydell Hurricanes 8UAA
+2026,9771,Hollydell Hurricanes 9AA
+2026,9837,Hollydell Jr Rebels Major 8AAA
+2026,9838,Hollydell Jr Rebels Minor 8AAA
+2026,10563,Igloo Igloo Jaguars 8U BEG
+2026,14938,Igloo Jaguars 10L
+2026,9775,Igloo Jaguars 10M
+2026,14962,Igloo Jaguars 11AA
+2026,9777,Igloo Jaguars 12GRY
+2026,15011,Igloo Jaguars 12M
+2026,9786,Igloo Jaguars 13AA
+2026,15046,Igloo Jaguars 14AA
+2026,15067,Igloo Jaguars 14L
+2026,9782,Igloo Jaguars 18AA
+2026,9785,Igloo Jaguars 18GRY
+2026,15503,Igloo Jaguars 6U
+2026,10822,Jersey Colts 10G
+2026,9789,Jersey Colts 10L
+2026,9790,Jersey Colts 10M Green
+2026,14948,Jersey Colts 10M Silver
+2026,14963,Jersey Colts 11AA
+2026,9791,Jersey Colts 12AA
+2026,9792,Jersey Colts 12L
+2026,9793,Jersey Colts 12M
+2026,9794,Jersey Colts 13AA
+2026,9795,Jersey Colts 14AA
+2026,9796,Jersey Colts 14GRY
+2026,15074,Jersey Colts 14L
+2026,9798,Jersey Colts 16AA BLACK
+2026,15093,Jersey Colts 16AA White
+2026,15106,Jersey Colts 16GRY
+2026,9800,Jersey Colts 18AA
+2026,9801,Jersey Colts 18GRY
+2026,10567,Jersey Colts 8U BEG
+2026,10566,Jersey Colts 8U INT
+2026,15517,Jersey Hawks 8AA
+2026,14930,Jersey Shore Wildcats 10GRY
+2026,9805,Jersey Shore Wildcats 10M
+2026,14972,Jersey Shore Wildcats 12AA
+2026,9807,Jersey Shore Wildcats 12GRY
+2026,15025,Jersey Shore Wildcats 12L
+2026,9808,Jersey Shore Wildcats 12M
+2026,9809,Jersey Shore Wildcats 13AA
+2026,15047,Jersey Shore Wildcats 14AA
+2026,9811,Jersey Shore Wildcats 14L
+2026,9812,Jersey Shore Wildcats 14M
+2026,9813,Jersey Shore Wildcats 15AA
+2026,15094,Jersey Shore Wildcats 16AA
+2026,9818,Jersey Shore Wildcats 16L
+2026,9815,Jersey Shore Wildcats 18AA
+2026,9816,Jersey Shore Wildcats 18GRY Karaban
+2026,15134,Jersey Shore Wildcats 18GRY Lepore
+2026,10570,Jersey Shore Wildcats 8U ADV
+2026,10569,Jersey Shore Wildcats 8U BEG
+2026,10571,Jersey Shore Wildcats 8U INT Orange
+2026,9817,Jersey Shore Wildcats Red 16L Franklin
+2026,9820,Jr Black Bears 10L
+2026,9821,Jr Black Bears 10M Gill
+2026,14949,Jr Black Bears 10M Hasselberger
+2026,14965,Jr Black Bears 11AA
+2026,14973,Jr Black Bears 12AA
+2026,9822,Jr Black Bears 12GRY
+2026,9823,Jr Black Bears 12L
+2026,9824,Jr Black Bears 12M
+2026,15048,Jr Black Bears 14AA
+2026,15068,Jr Black Bears 14L
+2026,9832,Jr Black Bears 16AA
+2026,14985,Jr Flyers 12GRY Girls
+2026,9836,Jr Flyers 12M
+2026,939,Jr Flyers 8U BEG
+2026,15488,Jr Flyers 8U INT
+2026,14964,Lancaster Firebirds 11AA
+2026,15026,Lancaster Firebirds 12L
+2026,9842,Lancaster Firebirds 14GRY
+2026,15086,Lancaster Firebirds 15AA
+2026,9843,Lancaster Firebirds 18AA
+2026,15504,Lancaster Firebirds 6U
+2026,10573,Lancaster Firebirds 8U BEG
+2026,15481,Lancaster Firebirds 8U INT Black
+2026,15482,Lancaster Firebirds 8U INT Orange
+2026,9846,Lehigh Valley Phantoms 10L
+2026,9847,Lehigh Valley Phantoms 10M
+2026,9849,Lehigh Valley Phantoms 12AA
+2026,9853,Lehigh Valley Phantoms 14AA
+2026,15056,Lehigh Valley Phantoms 14GRY
+2026,9854,Lehigh Valley Phantoms 14L
+2026,9856,Lehigh Valley Phantoms 15AA
+2026,9857,Lehigh Valley Phantoms 16AA
+2026,9858,Lehigh Valley Phantoms 16L
+2026,9859,Lehigh Valley Phantoms 18AA
+2026,10578,Lehigh Valley Phantoms 8U BEG
+2026,10577,Lehigh Valley Phantoms 8U INT
+2026,15483,Lehigh Valley Phantoms 8U INT Black
+2026,9861,Lehigh Valley Steel 8AAA
+2026,15149,LI Fisherman 8AAA
+2026,9863,LI Monarchs 2018 8AAA
+2026,9862,LI Monarchs 2019 8AAA
+2026,9850,LV Phantoms 12L Swavely
+2026,15004,LV Phantoms 12L Whitty
+2026,9869,Mercer Arrows 8AAA
+2026,9870,Mercer Chiefs 10AA
+2026,14939,Mercer Chiefs 10L
+2026,14950,Mercer Chiefs 10M
+2026,9872,Mercer Chiefs 11AA
+2026,14977,Mercer Chiefs 12AA
+2026,15027,Mercer Chiefs 12L
+2026,9874,Mercer Chiefs 12M
+2026,15033,Mercer Chiefs 13AA
+2026,9875,Mercer Chiefs 14AA
+2026,15078,Mercer Chiefs 14M
+2026,9881,Mercer Chiefs 16L
+2026,15401,Mercer Chiefs 18AA
+2026,9878,Mercer Chiefs 18GRY
+2026,15514,Mercer Chiefs 6U
+2026,10584,Mercer Chiefs 8U ADV
+2026,10583,Mercer Chiefs 8U INT Red
+2026,9879,Mercer Chiefs 9AA
+2026,14923,Montclair Blues 10AA
+2026,14941,Montclair Blues 10L Grey
+2026,14940,Montclair Blues 10L White
+2026,14966,Montclair Blues 11AA
+2026,14979,Montclair Blues 12GRY Blue
+2026,14980,Montclair Blues 12GRY Major
+2026,15012,Montclair Blues 12M
+2026,15034,Montclair Blues 13AA
+2026,15042,Montclair Blues 14AA
+2026,15057,Montclair Blues 14GRY
+2026,15069,Montclair Blues 14L
+2026,15088,Montclair Blues 15AA
+2026,15095,Montclair Blues 16AA
+2026,15107,Montclair Blues 16GRY
+2026,15117,Montclair Blues 16L
+2026,15125,Montclair Blues 18AA
+2026,15135,Montclair Blues 18GRY
+2026,15473,Montclair Blues 8U ADV
+2026,15497,Montclair Blues 8U BEG
+2026,15484,Montclair Blues 8U INT
+2026,9882,MYHA 10AA
+2026,9883,MYHA 10GRY
+2026,9898,MYHA 10L Blue
+2026,9884,MYHA 10M
+2026,9885,MYHA 12AA
+2026,9886,MYHA 12GRY
+2026,9888,MYHA 12L Blue
+2026,9887,MYHA 12L Gold
+2026,9890,MYHA 12M Gold
+2026,15035,MYHA 13AA
+2026,9893,MYHA 14GRY
+2026,9899,MYHA 14L Blue
+2026,9905,MYHA 14L Gold
+2026,9900,MYHA 14M Blue
+2026,9906,MYHA 14M Gold
+2026,9901,MYHA 16GRY Blue
+2026,9907,MYHA 16GRY Gold
+2026,15398,NJ Aviators 8AA
+2026,9912,NJ Bandits 10GRY
+2026,9914,NJ Bandits 10M Gold
+2026,9913,NJ Bandits 10M Lofberg
+2026,14981,NJ Bandits 12GRY
+2026,9916,NJ Bandits 12L
+2026,15013,NJ Bandits 12M
+2026,580,NJ Bandits 13AA
+2026,5451,NJ Bandits 14AA
+2026,9917,NJ Bandits 14GRY
+2026,15096,NJ Bandits 16AA Liautaud
+2026,15097,NJ Bandits 16AA MJ
+2026,9919,NJ Bandits 16GRY
+2026,9920,NJ Bandits 18AA
+2026,15513,NJ Bandits 6U
+2026,5132,NJ Bandits 8U ADV
+2026,5726,NJ Bandits 8U BEG
+2026,15498,NJ Bandits 8U BEG Fortino
+2026,5734,NJ Bandits 8U INT
+2026,14924,NJ Jets 10AA
+2026,9922,NJ Jets 10L
+2026,9923,NJ Jets 10M
+2026,9925,NJ Jets 12AA
+2026,15028,NJ Jets 12L
+2026,9926,NJ Jets 12M
+2026,9927,NJ Jets 13AA
+2026,9929,NJ Jets 14L
+2026,9934,NJ Jets 16AA Black
+2026,15098,NJ Jets 16AA White
+2026,15108,NJ Jets 16GRY
+2026,9930,NJ Jets 16L
+2026,9935,NJ Jets 18AA
+2026,9931,NJ Jets 18GRY
+2026,15510,NJ Jets 6U
+2026,10587,NJ Jets 8U BEG
+2026,10586,NJ Jets 8U INT
+2026,9932,NJ Jets 9AA
+2026,10585,NJ Jets ADV
+2026,10838,NJ Renegades 18AA
+2026,9939,North Jersey Avalanche 10AA
+2026,14951,North Jersey Avalanche 10M
+2026,9941,North Jersey Avalanche 11AA
+2026,9942,North Jersey Avalanche 12AA
+2026,9943,North Jersey Avalanche 13AA
+2026,9944,North Jersey Avalanche 14AA
+2026,9946,North Jersey Avalanche 14L
+2026,9947,North Jersey Avalanche 15AA
+2026,9948,North Jersey Avalanche 16AA Blue
+2026,15099,North Jersey Avalanche 16AA White
+2026,10824,North Jersey Avalanche 16GRY
+2026,15127,North Jersey Avalanche 18AA Blue
+2026,9950,North Jersey Avalanche 18AA White
+2026,15136,North Jersey Avalanche 18GRY
+2026,9951,North Jersey Blizzard 8AAA
+2026,14946,NY Arrows 10M
+2026,15022,NY Arrows 12L
+2026,15043,NY Arrows 14AA
+2026,15058,NY Dynamo 14GRY
+2026,9965,Outlaws 8AAA
+2026,14931,PAL Blue Knights 10GRY
+2026,14967,PAL Blue Knights 11AA
+2026,9970,PAL Blue Knights 12AA NTB
+2026,13875,PAL Blue Knights 12AA TB
+2026,15036,PAL Blue Knights 13AA
+2026,9971,PAL Blue Knights 14AA
+2026,9973,PAL Blue Knights 15AA
+2026,9974,PAL Blue Knights 16AA
+2026,9966,PAL Blue Knights 18AA
+2026,9981,PAL Blue Knights 9AA
+2026,9967,PAL Sound Tigers 10AA
+2026,9978,PAL Sound Tigers 12L
+2026,15037,PAL Sound Tigers 13AA
+2026,15070,PAL Sound Tigers 14L
+2026,15089,PAL Sound Tigers 15AA
+2026,15109,PAL Sound Tigers 16GRY
+2026,10594,Palmyra Black Knights 8U INT
+2026,14942,Palmyra Black Knights 10L
+2026,15014,Palmyra Black Knights 12M
+2026,5424,Palmyra Black Knights 13AA
+2026,9985,Palmyra Black Knights 14UL
+2026,9986,Palmyra Black Knights 16AA
+2026,15110,Palmyra Black Knights 16GRY
+2026,10593,Palmyra Black Knights 8U ADV
+2026,10592,Palmyra Black Knights 8U BEG
+2026,9983,PBK 10M
+2026,5316,PBK 11AA
+2026,5342,PBK 12AA
+2026,9984,PBK 12L
+2026,5832,PBK 14AA
+2026,9987,PBK 18GRY
+2026,10595,Pennsauken Pilots 8AA
+2026,9988,Pennsauken Pilots 8AAA
+2026,10010,Philadelphia Resistance 8AAA
+2026,10013,Ramapo Saints 10AA
+2026,15019,Ramapo Saints 10M
+2026,10018,Ramapo Saints 11AA
+2026,10019,Ramapo Saints 12AA
+2026,10020,Ramapo Saints 12GRY
+2026,10021,Ramapo Saints 12L
+2026,15015,Ramapo Saints 12M
+2026,10023,Ramapo Saints 13AA
+2026,10024,Ramapo Saints 14AA
+2026,10025,Ramapo Saints 14L
+2026,10026,Ramapo Saints 15AA
+2026,10027,Ramapo Saints 16AA
+2026,10028,Ramapo Saints 16L
+2026,10029,Ramapo Saints 18AA
+2026,15508,Ramapo Saints 6U
+2026,10600,Ramapo Saints 8U ADV Byrnes
+2026,15475,Ramapo Saints 8U ADV Torre
+2026,10602,Ramapo Saints 8U INT McKessy
+2026,10601,Ramapo Saints 8U INT Soffell
+2026,15142,Ramapo Saints 9AA
+2026,15143,Red Bank General 9AA
+2026,14925,Red Bank Generals 10AA
+2026,10032,Red Bank Generals 10M
+2026,14983,Red Bank Generals 12GRY
+2026,10035,Red Bank Generals 12L
+2026,10037,Red Bank Generals 14AA
+2026,10038,Red Bank Generals 14L
+2026,10039,Red Bank Generals 15AA
+2026,10040,Red Bank Generals 16AA
+2026,15128,Red Bank Generals 18AA Black
+2026,15129,Red Bank Generals 18AA White
+2026,10607,Red Bank Generals 8U ADV Black
+2026,15476,Red Bank Generals 8U ADV White
+2026,10606,Red Bank Generals 8U INT
+2026,10041,Red Bank Lumberjacks 8AAA
+2026,15059,Rocket Hockey Clubs 14GRY
+2026,14984,Rockets HC 12GRY
+2026,10048,Rockets HC 12L
+2026,10049,Rockets HC 12M
+2026,10050,Rockets HC 13AA Black
+2026,15038,Rockets HC 13AA Red
+2026,10051,Rockets HC 14AA
+2026,10056,Rockets HC 16AA Black
+2026,10058,Rockets HC 16AA Red
+2026,10043,Rockets Hockey Club 10AA
+2026,10044,Rockets Hockey Club 10L
+2026,14952,Rockets Hockey Club 10M
+2026,10046,Rockets Hockey Club 11AA
+2026,10059,Rockets Hockey Club 12AA
+2026,10055,Rockets Hockey Club 15AA
+2026,10053,Rockets Hockey Club 18AA
+2026,15509,Rockets Hockey Club 6U
+2026,15477,Rockets Hockey Club 8U ADV
+2026,10608,Rockets Hockey Club 8U BEG Black
+2026,10609,Rockets Hockey Club 8U BEG Red
+2026,10762,Rockets Hockey Club 8U INT
+2026,10054,Rockets Hockey Club 9AA
+2026,10631,Royals 8U BEG Gold
+2026,10632,Royals 8U BEG Silver
+2026,10764,Royals 8U BEG White
+2026,15152,Royals Hockey Club 10L
+2026,10182,Royals Hockey Club 10M
+2026,10184,Royals Hockey Club 12L
+2026,15006,Royals Hockey Club 12L Girls
+2026,10185,Royals Hockey Club 12M
+2026,10180,Royals Hockey Club 12M Girls
+2026,15039,Royals Hockey Club 13AA
+2026,15071,Royals Hockey Club 14L
+2026,15079,Royals Hockey Club 14M
+2026,15100,Royals Hockey Club 16AA
+2026,15118,Royals Hockey Club 16L
+2026,10634,Royals Hockey Club 8AA
+2026,10633,Royals Hockey Club 8U INT
+2026,10611,RSG 8AA
+2026,10061,RSG 8AAA Minor
+2026,15150,RSG 8AAA Mite Major Elite
+2026,15101,Rye Rangers HC 16AA
+2026,14943,Saugerties Mustangs 10L
+2026,15007,Saugerties Mustangs 12L
+2026,15060,Saugerties Mustangs 14GRY
+2026,10071,Saugerties Mustangs 18AA
+2026,15049,Skyland Kings 14AA
+2026,15075,Skyland Kings 14L
+2026,15102,Skyland Kings 16AA
+2026,15512,Skyland Kings 6U
+2026,15485,Skyland Kings 8U INT
+2026,15144,Skyland Kings 9AA
+2026,14944,Skylands Kings 10L
+2026,10072,Skylands Kings 10M
+2026,10073,Skylands Kings 12AA
+2026,10074,Skylands Kings 12M
+2026,10075,Skylands Kings 13AA
+2026,10078,Skylands Kings 16L
+2026,10079,Skylands Kings 18AA
+2026,10080,Skylands Kings 18GRY
+2026,10614,Skylands Kings 8U BEG
+2026,10082,So Maryland Sabres 12GRY
+2026,10083,So Maryland Sabres 12M
+2026,10085,So Maryland Sabres 14M
+2026,15090,So Maryland Sabres 15AA
+2026,10562,South Jersey Monarchs 8U BEG
+2026,14945,Southern Maryland Sabres 10L
+2026,10104,Team Philadelphia 10AA
+2026,14932,Team Philadelphia 10GRY
+2026,10105,Team Philadelphia 10L
+2026,10106,Team Philadelphia 10M
+2026,10107,Team Philadelphia 11AA
+2026,10108,Team Philadelphia 12AA
+2026,10109,Team Philadelphia 12GRY
+2026,10111,Team Philadelphia 12L Orange
+2026,10110,Team Philadelphia 12L White
+2026,15016,Team Philadelphia 12M
+2026,10113,Team Philadelphia 13AA Black
+2026,10112,Team Philadelphia 13AA Orange
+2026,15050,Team Philadelphia 14AA Black
+2026,10114,Team Philadelphia 14AA Orange
+2026,15073,Team Philadelphia 14L Orange
+2026,10116,Team Philadelphia 14L White
+2026,15080,Team Philadelphia 14M
+2026,10118,Team Philadelphia 16AA Black
+2026,15103,Team Philadelphia 16AA Orange
+2026,10122,Team Philadelphia 16GRY
+2026,15120,Team Philadelphia 16L Orange
+2026,15119,Team Philadelphia 16L White
+2026,10119,Team Philadelphia 18AA
+2026,15137,Team Philadelphia 18GRY Black
+2026,10120,Team Philadelphia 18GRY Orange
+2026,15505,Team Philadelphia 6U
+2026,956,Team Philadelphia 8U BEG Green
+2026,923,Team Philadelphia 8U BEG Red
+2026,955,Team Philadelphia 8U BEG Yelloe
+2026,15486,Team Philadelphia 8U INT Blue
+2026,15487,Team Philadelphia 8U INT White
+2026,10121,Team Philadelphia 9AA
+2026,14933,TI North Stars 10GRY
+2026,10125,TI North Stars 10L
+2026,10126,TI North Stars 10M
+2026,15029,TI North Stars 12L
+2026,5265,TI North Stars 8U ADV
+2026,5287,TI North Stars 8U BEG
+2026,10129,TI Selects 12G
+2026,15040,TI Selects 13AA
+2026,10133,Tom's River Blackhawks 10GRY
+2026,14974,Tom's River Blackhawks 12AA
+2026,10136,Tom's River Blackhawks 12M
+2026,10618,Tom's River Blackhawks 14GRY
+2026,10137,Tom's River Blackhawks 14M
+2026,15121,Tom's River Blackhawks 16L
+2026,10139,Tom's River Blackhawks 18AA
+2026,15138,Tom's River Blackhawks 18GRY
+2026,15145,Tom's River Blackhawks 9AA
+2026,6060,Toms River Blackhawks 8U ADV
+2026,15489,Toms River Blackhawks 8U INT
+2026,10147,Tri-City Eagles 12L
+2026,10148,Tri-City Eagles 12M
+2026,10150,Tri-City Eagles 14AA
+2026,10151,Tri-City Eagles 14GRY
+2026,10143,Tri-City Eagles 14L Sky
+2026,10153,Tri-City Eagles 15AA
+2026,10154,Tri-City Eagles 16AA
+2026,10142,Tri-City Eagles 16L
+2026,10156,Tri-City Eagles 18AA
+2026,10157,Tri-City Eagles 18GRY
+2026,14934,Valley Forge Colonials 10GRY
+2026,10158,Valley Forge Colonials 10L
+2026,10160,Valley Forge Colonials 12GRY
+2026,10161,Valley Forge Colonials 12L - Lattanze
+2026,15008,Valley Forge Colonials 12L - Malik
+2026,10162,Valley Forge Colonials 12M
+2026,15051,Valley Forge Colonials 14AA
+2026,15061,Valley Forge Colonials 14GRY
+2026,10165,Valley Forge Colonials 14M
+2026,10166,Valley Forge Colonials 15AA
+2026,10167,Valley Forge Colonials 16AA
+2026,10168,Valley Forge Colonials 16GRY
+2026,10169,Valley Forge Colonials 16L
+2026,10172,VFC 18AA
+2026,10173,VFC 18GRY
+2026,10621,VFC 8AA
+2026,15151,VFC 8AAA
+2026,15528,VFC 8U BEG Schuck
+2026,15491,VFC 8U INT Mullery
+2026,15490,VFC 8U INT Nielson
+2026,15492,VFC 8U INT VanSise
+2026,15146,VFC 9AA
+2026,10626,VFC Mite 8U BEG Murphy
+2026,14926,WBS Knights 10AA
+2026,14954,WBS Knights 10M
+2026,14975,WBS Knights 12AA
+2026,15493,WBS Knights 8U INT
+2026,10178,West Chester Wolverines 8AAA Major
+2026,10177,West Chester Wolverines 8AAA Minor
+2026,10188,Wissahickon Warriors 10AA
+2026,14955,Wissahickon Warriors 10M
+2026,14976,Wissahickon Warriors 12AA
+2026,10190,Wissahickon Warriors 12GRY
+2026,10192,Wissahickon Warriors 12M
+2026,15052,Wissahickon Warriors 14AA
+2026,15062,Wissahickon Warriors 14GRY
+2026,10196,Wissahickon Warriors 16L
+2026,15130,Wissahickon Warriors 18AA
+2026,10197,Wissahickon Warriors 18GRY
+2026,15518,Wissahickon Warriors 8AA
+2026,10635,Wissahickon Warriors 8U BEG Felix
+2026,15499,Wissahickon Warriors 8U BEG Lausch
+2026,15494,Wissahickon Warriors 8U INT
+2026,10813,Wissahickon Warriors 8U Red Wissahickon Warriors 8U ADV
+2026,10199,Wolfpack HC 11AA
+2026,14935,Woodbridge Wolfpack 10GRY
+2026,10200,Woodbridge Wolfpack 12AA
+2026,14986,Woodbridge Wolfpack 12GRY
+2026,10202,Woodbridge Wolfpack 13AA
+2026,15053,Woodbridge Wolfpack 14AA
+2026,15063,Woodbridge Wolfpack 14GRY
+2026,15091,Woodbridge Wolfpack 15AA
+2026,10209,Woodbridge Wolfpack 16AA
+2026,10205,Woodbridge Wolfpack 16GRY
+2026,10206,Woodbridge Wolfpack 16L
+2026,15131,Woodbridge Wolfpack 18AA
+2026,10207,Woodbridge Wolfpack 18GRY
+2026,15511,Woodbridge Wolfpack 6U
+2026,10638,Woodbridge Wolfpack 8U BEG Grey
+2026,15500,Woodbridge Wolfpack 8U BEG Navy
+2026,10211,Woodbridge Wolfpack HC 10AA
+2026,10212,Woodbridge Wolfpack HC 9AA
+2026,10213,York Devils 10GRY
+2026,10215,York Devils 10M
+2026,15030,York Devils 12L
+2026,10216,York Devils 12M
+2026,15112,York Devils 16GRY
+2026,10219,York Devils 16L
+2026,15132,York Devils 18AA
+2026,15495,York Devils 8U INT
+2026,10644,York York Devils 8U ADV
+2026,10645,York York Devils 8U BEG

@@ -6,7 +6,9 @@ export function cn(...inputs) {
 }
 
 export const api = {
-  baseUrl: process.env.REACT_APP_API_URL || 'http://localhost:8080/api',
+  // Use a relative path so it works through nginx/Cloudflare without CORS.
+  // nginx proxies /api -> backend:8080. For local dev, Vite can set VITE_API_URL.
+  baseUrl: process.env.VITE_API_URL || '/api',
   
   async signup(email, password, fullName) {
     const res = await fetch(`${this.baseUrl}/auth/signup`, {
