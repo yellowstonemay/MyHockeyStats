@@ -84,6 +84,10 @@ def main() -> None:
                 cur.execute(
                     "UPDATE deep_dive_requests SET status='COMPLETED', completed_at=NOW() WHERE id=%s",
                     (req_id,))
+            # Deep-dive finished — clear the "stats being retrieved" notification
+            cur.execute(
+                "UPDATE notifications SET status='RESOLVED', resolved_at=NOW() "
+                "WHERE user_id=%s AND type='DEEP_DIVE' AND status='ACTIVE'", (user_id,))
             conn.commit()
             print(f"[{req_id}] user {user_id}: {'FAILED - ' + error if error else 'COMPLETED'}", flush=True)
     finally:

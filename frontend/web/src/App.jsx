@@ -2,6 +2,7 @@ import React from 'react'
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { AuthProvider } from './lib/AuthContext'
 import Navigation from './components/Navigation'
+import NotificationBanner from './components/NotificationBanner'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import Home from './pages/Home'
 import SignUp from './pages/SignUp'
@@ -19,6 +20,7 @@ function AppRoutes() {
   return (
     <>
       {!hideGlobalNavigation && <Navigation />}
+      {!hideGlobalNavigation && <NotificationBanner />}
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/signup" element={<SignUp />} />

@@ -40,6 +40,12 @@ public class AuthController {
                     "INSERT INTO deep_dive_requests (id, user_id, scope, status, requested_at) " +
                     "VALUES (gen_random_uuid(), ?, 'ALL_SEASONS', 'PENDING', NOW())",
                     u.getId());
+                jdbcTemplate.update(
+                    "INSERT INTO notifications (id, user_id, type, title, message, status) " +
+                    "VALUES (gen_random_uuid(), ?, 'DEEP_DIVE', ?, ?, 'ACTIVE') " +
+                    "ON CONFLICT (user_id, type, status) DO NOTHING",
+                    u.getId(), "Stats are being retrieved",
+                    "We're pulling together your game history and season stats. This usually takes a few minutes.");
             }
             String token = jwtUtil.generateToken(u.getEmail());
             return ResponseEntity.ok(Map.of("token", token, "email", u.getEmail(), "isAdmin", u.isAdmin()));

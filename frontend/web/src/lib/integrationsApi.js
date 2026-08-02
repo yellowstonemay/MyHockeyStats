@@ -72,6 +72,17 @@ export const integrationsApi = {
     })
   },
 
+  // Notifications (e.g. "stats being retrieved" while a deep-dive runs)
+  fetchNotifications() {
+    return api.fetchWithAuth('/notifications')
+  },
+
+  dismissNotification(id) {
+    return api.fetchWithAuth(`/notifications/${encodeURIComponent(id)}/dismiss`, {
+      method: 'POST',
+    })
+  },
+
   fetchMyGameHistory(seasonYear) {
     const query = seasonYear ? `?seasonYear=${encodeURIComponent(seasonYear)}` : ''
     return api.fetchWithAuth(`/players/me/game-history${query}`)
