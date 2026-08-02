@@ -10,6 +10,9 @@ export default function Dashboard() {
   const [seasonRecords, setSeasonRecords] = useState([])
   const [seasonsLoading, setSeasonsLoading] = useState(false)
   const [seasonsError, setSeasonsError] = useState('')
+  const [editingKey, setEditingKey] = useState(null)
+  const [editValues, setEditValues] = useState({})
+  const [saving, setSaving] = useState(false)
 
   const getSeasonStartYear = (seasonValue) => {
     if (seasonValue == null) return 0
@@ -66,6 +69,48 @@ export default function Dashboard() {
       setSeasonsError(err.message || 'Failed to load season data')
     } finally {
       setSeasonsLoading(false)
+    }
+  }
+
+  const recordKey = (r) => `${r.source || 'src'}|${r.sourcePlayerId || ''}|${r.season || ''}`
+
+  const startEdit = (record) => {
+    setEditingKey(recordKey(record))
+    setEditValues({
+      gamesPlayed: record.gamesPlayed ?? 0,
+      goals: record.goals ?? 0,
+      assists: record.assists ?? 0,
+      points: record.points ?? 0,
+      pim: record.pim ?? 0,
+    })
+  }
+
+  const cancelEdit = () => {
+    setEditingKey(null)
+    setEditValues({})
+  }
+
+  const handleEditChange = (field, value) => {
+    setEditValues((prev) => ({ ...prev, [field]: value === '' ? '' : Number(value) }))
+  }
+
+  const saveEdit = async (record) => {
+    setSaving(true)
+    setSeasonsError('')
+    try {
+      await integrationsApi.updateMySeason(record.source, record.sourcePlayerId, record.season, {
+        gamesPlayed: Number(editValues.gamesPlayed || 0),
+        goals: Number(editValues.goals || 0),
+        assists: Number(editValues.assists || 0),
+        points: Number(editValues.points || 0),
+        pim: Number(editValues.pim || 0),
+      })
+      cancelEdit()
+      await loadSeasons()
+    } catch (err) {
+      setSeasonsError(err.message || 'Failed to update season')
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -274,21 +319,54 @@ export default function Dashboard() {
                             <th className="px-3 py-2 text-right">G</th>
                             <th className="px-3 py-2 text-right">A</th>
                             <th className="px-3 py-2 text-right">PTS</th>
+                            <th className="px-3 py-2 text-right">PIM</th>
+                            <th className="px-3 py-2 text-right">Actions</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {sortedSeasonRecords.map((record, idx) => (
-                            <tr key={`${record.source || 'src'}-${record.sourcePlayerId || idx}-${record.season || 'season'}`} className="border-t border-slate-200 hover:bg-slate-50">
-                              <td className="px-3 py-2 font-medium">{record.season || '—'}</td>
-                              <td className="px-3 py-2">{record.source || '—'}</td>
-                              <td className="px-3 py-2">{record.club || '—'}</td>
-                              <td className="px-3 py-2">{record.team || '—'}</td>
-                              <td className="px-3 py-2 text-right">{record.gamesPlayed ?? 0}</td>
-                              <td className="px-3 py-2 text-right">{record.goals ?? 0}</td>
-                              <td className="px-3 py-2 text-right">{record.assists ?? 0}</td>
-                              <td className="px-3 py-2 text-right font-semibold text-primary-700">{record.points ?? 0}</td>
-                            </tr>
-                          ))}
+                          {sortedSeasonRecords.map((record, idx) => {
+                            const isEditing = editingKey === recordKey(record)
+                            const numInput = (field) => (
+                              <input
+                                type="number"
+                                min="0"
+                                value={editValues[field] ?? 0}
+                                onChange={(e) => handleEditChange(field, e.target.value)}
+                                className="w-14 px-1 py-0.5 border border-slate-300 rounded text-right"
+                              />
+                            )
+                            return (
+                              <tr key={`${record.source || 'src'}-${record.sourcePlayerId || idx}-${record.season || 'season'}`} className="border-t border-slate-200 hover:bg-slate-50">
+                                <td className="px-3 py-2 font-medium">{record.season || '—'}</td>
+                                <td className="px-3 py-2">{record.source || '—'}</td>
+                                <td className="px-3 py-2">{record.club || '—'}</td>
+                                <td className="px-3 py-2">{record.team || '—'}</td>
+                                <td className="px-3 py-2 text-right">{isEditing ? numInput('gamesPlayed') : (record.gamesPlayed ?? 0)}</td>
+                                <td className="px-3 py-2 text-right">{isEditing ? numInput('goals') : (record.goals ?? 0)}</td>
+                                <td className="px-3 py-2 text-right">{isEditing ? numInput('assists') : (record.assists ?? 0)}</td>
+                                <td className="px-3 py-2 text-right font-semibold text-primary-700">{isEditing ? numInput('points') : (record.points ?? 0)}</td>
+                                <td className="px-3 py-2 text-right">{isEditing ? numInput('pim') : (record.pim ?? 0)}</td>
+                                <td className="px-3 py-2 text-right whitespace-nowrap">
+                                  {isEditing ? (
+                                    <span className="inline-flex gap-1">
+                                      <Button size="sm" onClick={() => saveEdit(record)} disabled={saving}>
+                                        {saving ? 'Saving...' : 'Save'}
+                                      </Button>
+                                      <Button size="sm" variant="outline" onClick={cancelEdit} disabled={saving}>
+                                        Cancel
+                                      </Button>
+                                    </span>
+                                  ) : (
+                                    record.isUserModified ? (
+                                      <Button size="sm" variant="outline" onClick={() => startEdit(record)}>
+                                        Edit
+                                      </Button>
+                                    ) : null
+                                  )}
+                                </td>
+                              </tr>
+                            )
+                          })}
                         </tbody>
                       </table>
                     </div>

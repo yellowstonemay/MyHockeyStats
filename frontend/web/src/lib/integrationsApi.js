@@ -48,6 +48,18 @@ export const integrationsApi = {
     return api.fetchWithAuth(`/players/me/seasons${query}`)
   },
 
+  // Update a user-editable (skeleton/empty) season record's stats
+  updateMySeason(source, sourcePlayerId, seasonLabel, stats) {
+    return api.fetchWithAuth(
+      `/players/me/seasons/${encodeURIComponent(source)}/${encodeURIComponent(sourcePlayerId)}/${encodeURIComponent(seasonLabel)}`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(stats),
+      }
+    )
+  },
+
   fetchMyGameHistory(seasonYear) {
     const query = seasonYear ? `?seasonYear=${encodeURIComponent(seasonYear)}` : ''
     return api.fetchWithAuth(`/players/me/game-history${query}`)

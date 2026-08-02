@@ -38,6 +38,15 @@ SOURCE_TABLES = {
     "AHF": "ahf_player_career",
 }
 
+# Raw roster tables + their player-name column. Used as a fallback so players
+# who are in rosters but have no career record (no stats on the source) still
+# get identity-linked and can receive skeleton season entries.
+ROSTER_TABLES = {
+    "AYHL": ("ayhl_roster", "player_name_raw"),
+    "THF": ("thf_rosters", "player_name"),
+    "AHF": ("ahf_rosters", "player_name"),
+}
+
 _PUNCT = re.compile(r"['\-.]+")
 _WS = re.compile(r"\s+")
 _CANON = re.compile(r"[\s,.'\-]+")
@@ -119,6 +128,27 @@ def find_candidates(conn, source: str, keys: list[str]) -> list[dict]:
         return [dict(r) for r in cur.fetchall()]
 
 
+def find_roster_candidates(conn, source: str, keys: list[str]) -> list[dict]:
+    """Match against the raw roster table (fallback when no career record).
+    Note: roster tables differ — ayhl_roster has season_label, thf/ahf_rosters
+    use season_year — so we avoid depending on a specific season column."""
+    table, name_col = ROSTER_TABLES[source]
+    placeholders = ", ".join(["%s"] * len(keys))
+    sql = f"""
+        SELECT player_id AS source_player_id,
+               min({name_col}) AS player_name,
+               count(*) AS seasons,
+               string_agg(DISTINCT team_name, '; ') AS teams
+        FROM {table}
+        WHERE regexp_replace(lower({name_col}), '[\\s,.''-]', '', 'g') IN ({placeholders})
+        GROUP BY player_id
+        ORDER BY player_id
+    """
+    with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+        cur.execute(sql, keys)
+        return [dict(r) for r in cur.fetchall()]
+
+
 def upsert_link(conn, user_id: int, source: str, player_id: str, player_name: str,
                 dry_run: bool) -> str:
     sql = """
@@ -167,6 +197,9 @@ def main() -> None:
             print(f"  user {u['user_id']} ({u['email']}) '{u['full_name']}' keys={keys}")
             for source in SOURCE_TABLES:
                 cands = find_candidates(conn, source, keys)
+                if not cands:
+                    # No career record — try the raw roster (players without stats).
+                    cands = find_roster_candidates(conn, source, keys)
                 if not cands:
                     print(f"    {source}: no match")
                     continue

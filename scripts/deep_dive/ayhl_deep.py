@@ -239,6 +239,45 @@ def upsert_career(conn, entry: dict) -> list[dict]:
     return changes
 
 
+def create_skeletons(conn, pid: str, name: str) -> int:
+    """For a player who appears in ayhl_roster but has NO career record for
+    those seasons, create 'skeleton' season rows with empty stats and
+    is_user_modified = TRUE so the user can fill them in from the GUI."""
+    with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+        cur.execute(
+            "SELECT DISTINCT season_label, team_name, jersey_number, player_name_raw "
+            "FROM ayhl_roster WHERE player_id = %s ORDER BY season_label",
+            (pid,),
+        )
+        roster_rows = [dict(r) for r in cur.fetchall()]
+        if not roster_rows:
+            return 0
+        cur.execute(
+            "SELECT season_label FROM ayhl_player_career WHERE source_player_id = %s",
+            (pid,),
+        )
+        existing = {r[0] for r in cur.fetchall()}
+        created = 0
+        for row in roster_rows:
+            label = row["season_label"]
+            if label in existing:
+                continue
+            player_name = name or (row["player_name_raw"] or "") or "N/A"
+            cur.execute(
+                """INSERT INTO ayhl_player_career
+                   (id, source_player_id, player_name, season_label, league_name,
+                    team_name, jersey_number, games_played, goals, assists, points,
+                    penalties, pim, is_user_modified, last_scraped_at, created_at, updated_at)
+                   VALUES (gen_random_uuid(), %s, %s, %s, 'AYHL', %s, %s,
+                           0, 0, 0, 0, 0, 0, TRUE, NOW(), NOW(), NOW())
+                   ON CONFLICT (source_player_id, season_label) DO NOTHING""",
+                (pid, player_name, label, row["team_name"], row["jersey_number"]),
+            )
+            created += 1
+        conn.commit()
+        return created
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--player-id", help="scrape a single player id")
@@ -268,10 +307,13 @@ def main() -> None:
                         print("    ", cells)
                     continue
                 changes = upsert_career(conn, entry)
+                skeletons = create_skeletons(conn, pid, entry["name"])
                 if changes:
                     print(f"    -> {len(changes)} change(s) detected & logged")
                 else:
                     print("    -> no stat changes")
+                if skeletons:
+                    print(f"    -> created {skeletons} skeleton season(s) (empty stats, user-editable)")
             except Exception as e:
                 print(f"  {pid}: ERROR {e}")
     finally:

@@ -54,7 +54,10 @@ public class AyhlPlayerCareer {
     
     @Column(name = "pim")
     private Integer pim;
-    
+
+    @Column(name = "is_user_modified", nullable = false)
+    private Boolean isUserModified = false;
+
     @Column(name = "last_scraped_at")
     private Instant lastScrapedAt;
     
@@ -106,6 +109,9 @@ public class AyhlPlayerCareer {
     
     public Integer getPim() { return pim; }
     public void setPim(Integer pim) { this.pim = pim; }
+
+    public Boolean getIsUserModified() { return isUserModified; }
+    public void setIsUserModified(Boolean isUserModified) { this.isUserModified = isUserModified; }
     
     public Instant getLastScrapedAt() { return lastScrapedAt; }
     public void setLastScrapedAt(Instant lastScrapedAt) { this.lastScrapedAt = lastScrapedAt; }

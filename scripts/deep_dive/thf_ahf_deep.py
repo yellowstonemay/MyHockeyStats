@@ -133,6 +133,10 @@ def upsert_career(conn, source: str, player_id: str, season_year: int,
         if dry_run:
             return changes
 
+        # Newly-created rows with all-zero stats have no real data yet — flag them
+        # as user-editable so the GUI lets the player fill them in.
+        is_empty = all(v == 0 for v in vals.values())
+
         # Manual upsert: thf/ahf_player_career do NOT have a unique constraint on
         # (source_player_id, season_label), so ON CONFLICT is unavailable.
         params = (
@@ -158,12 +162,12 @@ def upsert_career(conn, source: str, player_id: str, season_year: int,
                 f"""INSERT INTO {cfg['career_table']}
                     (id, source_player_id, player_name, season_label, league_name,
                      team_name, team_id, jersey_number, games_played, goals, assists,
-                     points, pim, last_scraped_at, created_at, updated_at)
-                    VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW(), NOW())""",
+                     points, pim, is_user_modified, last_scraped_at, created_at, updated_at)
+                    VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW(), NOW())""",
                 (player_id, row.get("player_name") or "", label, source,
                  row.get("team_name"), str(row.get("team_id") or ""),
                  row.get("jersey"), vals["games_played"], vals["goals"],
-                 vals["assists"], vals["points"], vals["pim"]),
+                 vals["assists"], vals["points"], vals["pim"], is_empty),
             )
         for ch in changes:
             cur.execute(

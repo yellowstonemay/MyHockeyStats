@@ -14,10 +14,12 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -51,6 +53,9 @@ public class SeasonsController {
 
     @Autowired
     private GameHistoryLookupService gameHistoryLookupService;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
     
     /**
      * GET /api/players/{playerId}/seasons
@@ -216,6 +221,76 @@ public class SeasonsController {
         return ResponseEntity.ok()
             .cacheControl(CacheControl.maxAge(300, TimeUnit.SECONDS).cachePrivate())
             .body(response);
+    }
+
+    /**
+     * PUT /api/players/me/seasons/{source}/{sourcePlayerId}/{seasonLabel}
+     *
+     * Update a user-editable (empty/skeleton) career season record's stats.
+     * Only records linked to the authenticated user via player_identity_map
+     * may be updated.
+     */
+    public record UpdateSeasonRequest(Integer gamesPlayed, Integer goals, Integer assists,
+                                      Integer points, Integer pim) {}
+
+    @PutMapping("/me/seasons/{source}/{sourcePlayerId}/{seasonLabel}")
+    public ResponseEntity<?> updateMySeason(
+            @PathVariable String source,
+            @PathVariable String sourcePlayerId,
+            @PathVariable String seasonLabel,
+            @RequestBody UpdateSeasonRequest req,
+            @RequestHeader(value = "Authorization", required = false) String authHeader) {
+
+        String email = extractEmailFromAuthHeader(authHeader);
+        if (email == null) {
+            return ResponseEntity.status(401)
+                .body(new ErrorResponse("UNAUTHORIZED", "Authentication required."));
+        }
+
+        Optional<User> userOpt = userRepository.findByEmail(email);
+        if (userOpt.isEmpty()) {
+            return ResponseEntity.status(404)
+                .body(new ErrorResponse("USER_NOT_FOUND", "User not found."));
+        }
+
+        String src = source.toUpperCase();
+        String table = switch (src) {
+            case "AYHL" -> "ayhl_player_career";
+            case "THF" -> "thf_player_career";
+            case "AHF" -> "ahf_player_career";
+            default -> null;
+        };
+        if (table == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Invalid source"));
+        }
+
+        // Only allow editing records linked to this user.
+        Integer linked = jdbcTemplate.queryForObject(
+            "SELECT 1 FROM player_identity_map WHERE user_id = ? AND source = ? AND source_player_id = ?",
+            Integer.class, userOpt.get().getId(), src, sourcePlayerId);
+        if (linked == null) {
+            return ResponseEntity.status(403)
+                .body(new ErrorResponse("FORBIDDEN", "This season record is not linked to your account."));
+        }
+
+        int updated = jdbcTemplate.update(
+            "UPDATE " + table + " SET games_played = ?, goals = ?, assists = ?, points = ?, " +
+            "pim = ?, is_user_modified = TRUE, updated_at = NOW() " +
+            "WHERE source_player_id = ? AND season_label = ?",
+            req.gamesPlayed(), req.goals(), req.assists(), req.points(),
+            req.pim(), sourcePlayerId, seasonLabel);
+
+        if (updated == 0) {
+            return ResponseEntity.status(404)
+                .body(new ErrorResponse("NOT_FOUND", "Season record not found."));
+        }
+
+        return ResponseEntity.ok(Map.of(
+            "source", src,
+            "sourcePlayerId", sourcePlayerId,
+            "seasonLabel", seasonLabel,
+            "updated", true,
+            "isUserModified", true));
     }
 
     private String extractEmailFromAuthHeader(String authHeader) {

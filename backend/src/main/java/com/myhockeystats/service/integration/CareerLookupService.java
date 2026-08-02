@@ -178,6 +178,7 @@ public class CareerLookupService {
                 r.getPoints(),
                 r.getPenalties(),
                 r.getPim() != null ? r.getPim().doubleValue() : null,
+                Boolean.TRUE.equals(r.getIsUserModified()),  // isUserModified
                 r.getCreatedAt() != null ? r.getCreatedAt().atOffset(ZoneOffset.UTC) : null,
                 false,  // isAmbiguousMembership - set to false here (ambiguity at response level)
                 null    // ambiguityNote - set at response level
@@ -205,6 +206,7 @@ public class CareerLookupService {
                 r.getPoints(),
                 r.getPenalties(),
                 r.getPim(),
+                Boolean.TRUE.equals(r.getIsUserModified()),  // isUserModified
                 r.getCreatedAt() != null ? r.getCreatedAt().atOffset(ZoneOffset.UTC) : null,
                 false,  // isAmbiguousMembership
                 null    // ambiguityNote
@@ -232,6 +234,7 @@ public class CareerLookupService {
                 r.getPoints(),
                 r.getPenalties(),
                 r.getPim(),
+                Boolean.TRUE.equals(r.getIsUserModified()),  // isUserModified
                 r.getCreatedAt() != null ? r.getCreatedAt().atOffset(ZoneOffset.UTC) : null,
                 false,  // isAmbiguousMembership
                 null    // ambiguityNote

@@ -96,6 +96,7 @@ public final class IntegrationDtos {
             Integer points,                   // Computed: goals + assists
             Integer penalties,
             Double pim,                       // Penalty in minutes
+            boolean isUserModified,           // true if user-editable (skeleton/user-edited)
             OffsetDateTime importedAt,        // When data was imported
             boolean isAmbiguousMembership,    // true if multiple players found
             String ambiguityNote              // Helpful message if ambiguity
