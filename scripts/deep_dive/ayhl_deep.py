@@ -20,7 +20,7 @@ import argparse
 import os
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 
 import psycopg2
 import psycopg2.extras
@@ -41,6 +41,16 @@ STAT_FIELDS = [
     ("penalties", "Penalties"),
     ("pim", "PIM"),
 ]
+
+
+def current_season_year() -> int:
+    """Current AYHL season start year (April–March cycle)."""
+    today = date.today()
+    return today.year if today.month >= 4 else today.year - 1
+
+
+def season_label_for(year: int) -> str:
+    return f"{year}-{year + 1} Season"
 
 
 def get_conn():
@@ -159,7 +169,7 @@ def to_int(v) -> int | None:
         return None
 
 
-def upsert_career(conn, entry: dict) -> list[dict]:
+def upsert_career(conn, entry: dict, all_seasons: bool = False) -> list[dict]:
     """Upsert one player's career rows; return list of change events."""
     changes: list[dict] = []
     pid = entry["pid"]
@@ -167,8 +177,13 @@ def upsert_career(conn, entry: dict) -> list[dict]:
     jersey = entry["jersey"] or None
     now = datetime.now(timezone.utc)
 
+    rows = entry["rows"]
+    if not all_seasons:
+        cur_label = season_label_for(current_season_year())
+        rows = [r for r in rows if r[0] == cur_label]
+
     with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-        for cells in entry["rows"]:
+        for cells in rows:
             season_label = cells[0]
             league_name = "AYHL"
             team_name = cells[2] if len(cells) > 2 else None
@@ -239,10 +254,11 @@ def upsert_career(conn, entry: dict) -> list[dict]:
     return changes
 
 
-def create_skeletons(conn, pid: str, name: str) -> int:
+def create_skeletons(conn, pid: str, name: str, all_seasons: bool = False) -> int:
     """For a player who appears in ayhl_roster but has NO career record for
     those seasons, create 'skeleton' season rows with empty stats and
-    is_user_modified = TRUE so the user can fill them in from the GUI."""
+    is_user_modified = TRUE so the user can fill them in from the GUI.
+    By default only the current season is considered."""
     with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
         cur.execute(
             "SELECT DISTINCT season_label, team_name, jersey_number, player_name_raw "
@@ -250,6 +266,11 @@ def create_skeletons(conn, pid: str, name: str) -> int:
             (pid,),
         )
         roster_rows = [dict(r) for r in cur.fetchall()]
+        if not roster_rows:
+            return 0
+        if not all_seasons:
+            cur_label = season_label_for(current_season_year())
+            roster_rows = [r for r in roster_rows if r["season_label"] == cur_label]
         if not roster_rows:
             return 0
         cur.execute(
@@ -281,6 +302,8 @@ def create_skeletons(conn, pid: str, name: str) -> int:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--player-id", help="scrape a single player id")
+    ap.add_argument("--all-seasons", action="store_true",
+                    help="process ALL seasons (default: current season only)")
     ap.add_argument("--dry-run", action="store_true", help="fetch + show, no DB writes")
     args = ap.parse_args()
 
@@ -306,8 +329,8 @@ def main() -> None:
                     for cells in entry["rows"]:
                         print("    ", cells)
                     continue
-                changes = upsert_career(conn, entry)
-                skeletons = create_skeletons(conn, pid, entry["name"])
+                changes = upsert_career(conn, entry, all_seasons=args.all_seasons)
+                skeletons = create_skeletons(conn, pid, entry["name"], all_seasons=args.all_seasons)
                 if changes:
                     print(f"    -> {len(changes)} change(s) detected & logged")
                 else:

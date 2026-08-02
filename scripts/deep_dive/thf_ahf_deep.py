@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import argparse
 import os
-from datetime import datetime
+from datetime import date, datetime
 
 import psycopg2
 import psycopg2.extras
@@ -29,6 +29,12 @@ SEASON_LABEL_BY_YEAR = {
     2026: "2026-2027 Season",
     2025: "2025-2026 Season",
 }
+
+
+def current_season_year() -> int:
+    """Current season start year (April–March cycle)."""
+    today = date.today()
+    return today.year if today.month >= 4 else today.year - 1
 
 CONFIG = {
     "THF": {
@@ -56,7 +62,7 @@ def get_conn():
     )
 
 
-def load_linked(conn, source: str) -> list[tuple[str, str]]:
+def load_linked(conn, source: str, player_id: str | None = None) -> list[tuple[str, str]]:
     sql = """
         SELECT pim.source_player_id, COALESCE(pp.full_name, u.full_name, '')
         FROM player_identity_map pim
@@ -64,8 +70,12 @@ def load_linked(conn, source: str) -> list[tuple[str, str]]:
         LEFT JOIN player_profiles pp ON pp.user_id = pim.user_id
         WHERE pim.source = %s AND pim.link_state = 'CONFIRMED'
     """
+    params: list = [source]
+    if player_id:
+        sql += " AND pim.source_player_id = %s"
+        params.append(player_id)
     with conn.cursor() as cur:
-        cur.execute(sql, (source,))
+        cur.execute(sql, params)
         rows = cur.fetchall()
     # Dedupe by player id (multiple users can link to the same source player)
     seen = {}
@@ -75,8 +85,10 @@ def load_linked(conn, source: str) -> list[tuple[str, str]]:
     return list(seen.items())
 
 
-def latest_roster_stats(conn, source: str, player_id: str) -> list[dict]:
-    """Latest-season roster rows for a player from the raw roster table."""
+def latest_roster_stats(conn, source: str, player_id: str,
+                        season_year: int | None = None) -> list[dict]:
+    """Roster rows for a player from the raw roster table, optionally filtered
+    to one season_year."""
     cfg = CONFIG[source]
     table = cfg["roster_table"]
     sql = f"""
@@ -84,10 +96,14 @@ def latest_roster_stats(conn, source: str, player_id: str) -> list[dict]:
                gp, goals, assists, points, pims, ppg, sog
         FROM {table}
         WHERE player_id = %s
-        ORDER BY season_year DESC
     """
+    params: list = [player_id]
+    if season_year is not None:
+        sql += " AND season_year = %s"
+        params.append(season_year)
+    sql += " ORDER BY season_year DESC"
     with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-        cur.execute(sql, (player_id,))
+        cur.execute(sql, params)
         return [dict(r) for r in cur.fetchall()]
 
 
@@ -185,17 +201,22 @@ def upsert_career(conn, source: str, player_id: str, season_year: int,
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", choices=["THF", "AHF"], help="only this source")
+    ap.add_argument("--player-id", help="only this player id")
+    ap.add_argument("--all-seasons", action="store_true",
+                    help="process ALL seasons (default: current season only)")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
     conn = get_conn()
     try:
         sources = ["THF", "AHF"] if not args.source else [args.source]
+        cur_year = current_season_year()
         for source in sources:
-            links = load_linked(conn, source)
+            links = load_linked(conn, source, player_id=args.player_id)
             print(f"[{source}] {len(links)} linked user(s)")
             for player_id, _label in links:
-                rows = latest_roster_stats(conn, source, player_id)
+                season_year = None if args.all_seasons else cur_year
+                rows = latest_roster_stats(conn, source, player_id, season_year=season_year)
                 if not rows:
                     print(f"  {player_id}: no roster rows")
                     continue

@@ -3,7 +3,7 @@ import { useAuth } from '../lib/AuthContext'
 import { integrationsApi } from '../lib/integrationsApi'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/Card'
 import { Button } from '../components/Button'
-import { AlertCircle, Loader2, RefreshCw } from 'lucide-react'
+import { AlertCircle, Loader2, RefreshCw, Radar } from 'lucide-react'
 
 function fmt(ts) {
   if (!ts) return '—'
@@ -25,6 +25,8 @@ export default function AdminPlayersPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [isAdmin, setIsAdmin] = useState(!!user?.isAdmin)
+  const [triggeringId, setTriggeringId] = useState(null)
+  const [actionMsg, setActionMsg] = useState(null)
 
   useEffect(() => {
     setIsAdmin(!!user?.isAdmin)
@@ -46,6 +48,19 @@ export default function AdminPlayersPage() {
   useEffect(() => {
     if (isAdmin) load()
   }, [isAdmin])
+
+  const triggerDeepDive = async (p) => {
+    setTriggeringId(p.id)
+    setActionMsg(null)
+    try {
+      const resp = await integrationsApi.triggerDeepDive(p.id)
+      setActionMsg({ kind: 'ok', text: `${p.user_name || p.email}: ${resp.message}` })
+    } catch (err) {
+      setActionMsg({ kind: 'err', text: `${p.user_name || p.email}: ${err.message || 'Failed to enqueue'}` })
+    } finally {
+      setTriggeringId(null)
+    }
+  }
 
   const staleThresholdDays = 2
   const status = (p) => {
@@ -88,6 +103,12 @@ export default function AdminPlayersPage() {
           </div>
         )}
 
+        {isAdmin && actionMsg && (
+          <div className={`p-3 border rounded-md mb-4 text-sm ${actionMsg.kind === 'ok' ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : 'bg-red-100 border-red-400 text-red-700'}`}>
+            {actionMsg.text}
+          </div>
+        )}
+
         {isAdmin && loading && (
           <div className="flex items-center justify-center py-10 text-slate-600">
             <Loader2 className="w-5 h-5 animate-spin mr-2" />
@@ -99,7 +120,7 @@ export default function AdminPlayersPage() {
           <Card>
             <CardHeader>
               <CardTitle>Players ({players.length})</CardTitle>
-              <CardDescription>Registration, last visit, and deep-dive freshness</CardDescription>
+              <CardDescription>Registration, last visit, and deep-dive freshness. The <strong>Full deep-dive</strong> button enqueues an all-seasons backfill for that player (picked up by the Mac mini poller).</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="overflow-x-auto">
@@ -114,11 +135,13 @@ export default function AdminPlayersPage() {
                       <th className="px-3 py-2 text-left">Last visit</th>
                       <th className="px-3 py-2 text-left">Last deep-dive</th>
                       <th className="px-3 py-2 text-left">Status</th>
+                      <th className="px-3 py-2 text-left">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {players.map((p) => {
                       const st = status(p)
+                      const hasLinks = Number(p.link_count) > 0
                       return (
                         <tr key={p.id} className="border-t border-slate-200 hover:bg-slate-50">
                           <td className="px-3 py-2 whitespace-nowrap">{fmt(p.created_at)}</td>
@@ -133,6 +156,18 @@ export default function AdminPlayersPage() {
                           <td className="px-3 py-2 whitespace-nowrap">{fmt(p.last_deep_dive_at)}</td>
                           <td className="px-3 py-2">
                             <span className={`text-xs px-2 py-1 rounded-full ${st.cls}`}>{st.label}</span>
+                          </td>
+                          <td className="px-3 py-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={!hasLinks || triggeringId === p.id}
+                              onClick={() => triggerDeepDive(p)}
+                              title={hasLinks ? 'Enqueue full all-seasons deep-dive' : 'Player has no identity links'}
+                            >
+                              {triggeringId === p.id ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : <Radar className="w-3.5 h-3.5 mr-1" />}
+                              Deep-dive
+                            </Button>
                           </td>
                         </tr>
                       )

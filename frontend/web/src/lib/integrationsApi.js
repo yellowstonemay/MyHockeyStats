@@ -65,6 +65,13 @@ export const integrationsApi = {
     return api.fetchWithAuth('/admin/players')
   },
 
+  // Admin: enqueue a FULL (all-seasons) deep-dive for a user
+  triggerDeepDive(userId) {
+    return api.fetchWithAuth(`/admin/deep-dive/${encodeURIComponent(userId)}`, {
+      method: 'POST',
+    })
+  },
+
   fetchMyGameHistory(seasonYear) {
     const query = seasonYear ? `?seasonYear=${encodeURIComponent(seasonYear)}` : ''
     return api.fetchWithAuth(`/players/me/game-history${query}`)
