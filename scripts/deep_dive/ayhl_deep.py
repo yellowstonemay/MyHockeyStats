@@ -3,8 +3,11 @@
 
 For each AYHL identity link (or a single --player-id), fetch the player's FULL
 career from atlantichockey.org (all seasons, not just current), upsert every
-season into `ayhl_player_career`, and record any stat changes into
-`ayhl_change_event` (per-field old -> new).
+season into `ayhl_player_career`, record any stat changes into
+`ayhl_change_event` (per-field old -> new), and upsert the player's game-by-game
+history into `ayhl_player_games` (current season by default; every season with
+--all-seasons). Game rows are UPSERTed on (player_id, season_year, game_id) —
+existing rows are never deleted.
 
 The AYHL player page (playerpage.php?playerid=...) is server-rendered HTML, so
 plain HTTP + BeautifulSoup is sufficient (no browser needed).
@@ -12,6 +15,7 @@ plain HTTP + BeautifulSoup is sufficient (no browser needed).
 Usage:
     python ayhl_deep.py                       # all AYHL-linked users
     python ayhl_deep.py --player-id 125307    # single player
+    python ayhl_deep.py --all-seasons         # career + games for all seasons
     python ayhl_deep.py --dry-run             # fetch + show, no DB writes
 """
 from __future__ import annotations
@@ -21,6 +25,8 @@ import os
 import re
 import sys
 from datetime import datetime, timezone, date
+from html import unescape
+from uuid import uuid4
 
 import psycopg2
 import psycopg2.extras
@@ -82,10 +88,13 @@ def load_ayhl_linked_players(conn) -> list[tuple[str, str]]:
     return list(seen.items())
 
 
-def fetch_player_page(pid: str) -> BeautifulSoup:
-    """Fetch a player page, preferring playwright+stealth (required on the Mac
-    mini where plain requests gets a Cloudflare 403), falling back to requests."""
+def fetch_player_html(pid: str, season_id: int | None = None) -> str:
+    """Fetch a player page's raw HTML, preferring playwright+stealth (required on
+    the Mac mini where plain requests gets a Cloudflare 403), falling back to
+    requests. Passing season_id returns that season's game table."""
     url = BASE_URL.format(pid=pid)
+    if season_id is not None:
+        url += f"&seasonid={season_id}"
     try:
         from playwright.sync_api import sync_playwright
         from playwright_stealth import Stealth
@@ -111,12 +120,16 @@ def fetch_player_page(pid: str) -> BeautifulSoup:
                 html = page.content()
             finally:
                 browser.close()
-        return BeautifulSoup(html, "html.parser")
+        return html
     except Exception as e:
         print(f"    (playwright failed: {e}; trying requests)")
         resp = requests.get(url, headers=HEADERS, timeout=30)
         resp.raise_for_status()
-        return BeautifulSoup(resp.text, "html.parser")
+        return resp.text
+
+
+def fetch_player_page(pid: str, season_id: int | None = None) -> BeautifulSoup:
+    return BeautifulSoup(fetch_player_html(pid, season_id), "html.parser")
 
 
 def parse_player(soup: BeautifulSoup, pid: str) -> dict:
@@ -254,6 +267,228 @@ def upsert_career(conn, entry: dict, all_seasons: bool = False) -> list[dict]:
     return changes
 
 
+# ---------------------------------------------------------------------------
+# Game-by-game history (upsert into ayhl_player_games — never deletes rows)
+# ---------------------------------------------------------------------------
+
+def _safe_int(val: str) -> int | None:
+    v = (val or "").strip()
+    if not v or v == "-":
+        return None
+    try:
+        return int(v)
+    except ValueError:
+        return None
+
+
+def _parse_date(val: str) -> str | None:
+    """Convert MM/DD/YY to ISO date string YYYY-MM-DD, or None on failure."""
+    v = (val or "").strip()
+    if not v:
+        return None
+    try:
+        parts = v.split("/")
+        if len(parts) == 3:
+            month, day, year_2 = int(parts[0]), int(parts[1]), int(parts[2])
+            full_year = 2000 + year_2
+            return f"{full_year:04d}-{month:02d}-{day:02d}"
+    except (ValueError, IndexError):
+        pass
+    return None
+
+
+def _strip_tags(value: str) -> str:
+    text = re.sub(r"<[^>]+>", "", value)
+    return unescape(text).replace("\xa0", " ").strip()
+
+
+def parse_games_table(html: str, player_id: str, player_name: str,
+                      season_year: int, season_id: int | str) -> list[dict]:
+    """Parse the 'Statistics By Game' table from a player page.
+
+    Expected columns (in order):
+        Game ID | Date | Game Type | League | Team For | Team Against |
+        G | G(PP) | G(SH) | G(SO) | A | P | PIM
+    """
+    heading_match = re.search(
+        r"Statistics By Game</h[234]>\s*<table class=\"w3-table\">\s*<tr><td>\s*<table[^>]*>(.*?)</table>",
+        html,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if not heading_match:
+        return []
+
+    table_html = heading_match.group(1)
+    row_matches = re.findall(r"<tr\b[^>]*>(.*?)</tr>", table_html, re.IGNORECASE | re.DOTALL)
+    if not row_matches:
+        return []
+
+    header_cells_raw = re.findall(r"<th\b[^>]*>(.*?)</(?:th|td)>", row_matches[0], re.IGNORECASE | re.DOTALL)
+    header_cells = [_strip_tags(cell) for cell in header_cells_raw]
+    normalised = [c.lower().replace(" ", "").replace("(", "").replace(")", "") for c in header_cells]
+    col_map = {name: idx for idx, name in enumerate(normalised)}
+
+    if "gameid" not in col_map:
+        return []
+
+    required = {"gameid", "date", "teamfor", "teamagainst", "g", "a", "p", "pim"}
+    if not required.issubset(col_map):
+        print(f"    [WARN] Unexpected game table columns for player {player_id}: {list(col_map.keys())}")
+        return []
+
+    games: list[dict] = []
+    scraped_at = datetime.now(timezone.utc)
+    label = season_label_for(season_year)
+
+    for row_html in row_matches[1:]:
+        cells = [_strip_tags(cell) for cell in re.findall(r"<td\b[^>]*>(.*?)</td>", row_html, re.IGNORECASE | re.DOTALL)]
+        if len(cells) < len(col_map):
+            continue
+
+        def col(name: str) -> str:
+            idx = col_map.get(name)
+            return cells[idx].strip() if idx is not None and idx < len(cells) else ""
+
+        game_id = col("gameid")
+        if not game_id:
+            continue
+
+        games.append({
+            "player_id": player_id,
+            "player_name": player_name,
+            "season_year": season_year,
+            "season_label": label,
+            "season_id": str(season_id),
+            "game_id": game_id,
+            "game_date": _parse_date(col("date")),
+            "game_type": col("gametype") or None,
+            "league": col("league") or None,
+            "team_for": col("teamfor") or None,
+            "team_against": col("teamagainst") or None,
+            "goals": _safe_int(col("g")),
+            "goals_pp": _safe_int(col("gpp")),
+            "goals_sh": _safe_int(col("gsh")),
+            "goals_so": _safe_int(col("gso")),
+            "assists": _safe_int(col("a")),
+            "points": _safe_int(col("p")),
+            "pim": _safe_int(col("pim")),
+            "scraped_at": scraped_at,
+        })
+
+    return games
+
+
+UPSERT_GAMES_SQL = """
+INSERT INTO ayhl_player_games (
+    id, player_id, player_name, season_year, season_label, season_id,
+    game_id, game_date, game_type, league,
+    team_for, team_against,
+    goals, goals_pp, goals_sh, goals_so,
+    assists, points, pim, scraped_at
+) VALUES (
+    %s, %s, %s, %s, %s, %s,
+    %s, %s, %s, %s,
+    %s, %s,
+    %s, %s, %s, %s,
+    %s, %s, %s, %s
+)
+ON CONFLICT (player_id, season_year, game_id) DO UPDATE SET
+    player_name   = EXCLUDED.player_name,
+    season_label  = EXCLUDED.season_label,
+    season_id     = EXCLUDED.season_id,
+    game_date     = EXCLUDED.game_date,
+    game_type     = EXCLUDED.game_type,
+    league        = EXCLUDED.league,
+    team_for      = EXCLUDED.team_for,
+    team_against  = EXCLUDED.team_against,
+    goals         = EXCLUDED.goals,
+    goals_pp      = EXCLUDED.goals_pp,
+    goals_sh      = EXCLUDED.goals_sh,
+    goals_so      = EXCLUDED.goals_so,
+    assists       = EXCLUDED.assists,
+    points        = EXCLUDED.points,
+    pim           = EXCLUDED.pim,
+    scraped_at    = EXCLUDED.scraped_at
+"""
+
+
+def upsert_player_games(conn, games: list[dict]) -> int:
+    """Upsert game rows into ayhl_player_games. Existing rows (same player_id +
+    season_year + game_id) are UPDATEd, never deleted."""
+    with conn.cursor() as cur:
+        for g in games:
+            cur.execute(UPSERT_GAMES_SQL, (
+                str(uuid4()),
+                g["player_id"], g["player_name"], g["season_year"], g["season_label"],
+                g["season_id"], g["game_id"], g["game_date"], g["game_type"], g["league"],
+                g["team_for"], g["team_against"],
+                g["goals"], g["goals_pp"], g["goals_sh"], g["goals_so"],
+                g["assists"], g["points"], g["pim"], g["scraped_at"],
+            ))
+    conn.commit()
+    return len(games)
+
+
+def _roster_season_ids(conn) -> list[tuple[int, int]]:
+    """(season_year, season_id) pairs from ayhl_roster, newest first."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT DISTINCT season_id, season_label FROM ayhl_roster")
+        out: list[tuple[int, int]] = []
+        for sid, label in cur.fetchall():
+            m = re.match(r"(\d{4})-", label or "")
+            if m:
+                try:
+                    out.append((int(m.group(1)), int(sid)))
+                except (TypeError, ValueError):
+                    pass
+    return sorted(out, key=lambda x: -x[0])
+
+
+def game_history(conn, pid: str, name: str, all_seasons: bool = False,
+                 dry_run: bool = False) -> int:
+    """Fetch + upsert game-by-game history for one AYHL player.
+
+    The AYHL player page only renders its "Statistics By Game" table when given
+    a seasonid, so we look the season ids up from ayhl_roster and fetch with
+    them. Default: the most recent season that has games (fallback: the current
+    season). --all-seasons: every season in ayhl_roster. Rows are UPSERTed on
+    (player_id, season_year, game_id) — existing rows are refreshed, never
+    deleted.
+    """
+    with conn.cursor() as cur:
+        cur.execute("SELECT COALESCE(MAX(season_year), 0) FROM ayhl_player_games")
+        max_game_year = cur.fetchone()[0] or 0
+    seasons = _roster_season_ids(conn)
+
+    if all_seasons:
+        targets = seasons
+    else:
+        want = max_game_year if max_game_year else current_season_year()
+        targets = [(sy, sid) for sy, sid in seasons if sy == want]
+        if not targets and seasons:
+            targets = seasons[:1]
+
+    total = 0
+    for season_year, sid in targets:
+        try:
+            html = fetch_player_html(pid, season_id=sid)
+        except Exception as e:
+            print(f"    games[{season_year}-{season_year + 1}]: ERROR {e}")
+            continue
+        games = parse_games_table(html, pid, name or "N/A", season_year, sid)
+        if not games:
+            print(f"    games[{season_year}-{season_year + 1}]: no game rows")
+            continue
+        if dry_run:
+            print(f"    games[{season_year}-{season_year + 1}]: {len(games)} row(s) (dry-run)")
+            total += len(games)
+        else:
+            upsert_player_games(conn, games)
+            print(f"    games[{season_year}-{season_year + 1}]: upserted {len(games)} row(s)")
+            total += len(games)
+    return total
+
+
 def create_skeletons(conn, pid: str, name: str, all_seasons: bool = False) -> int:
     """For a player who appears in ayhl_roster but has NO career record for
     those seasons, create 'skeleton' season rows with empty stats and
@@ -337,6 +572,9 @@ def main() -> None:
                     print("    -> no stat changes")
                 if skeletons:
                     print(f"    -> created {skeletons} skeleton season(s) (empty stats, user-editable)")
+                # Game-by-game history (upsert into ayhl_player_games)
+                game_history(conn, pid, entry["name"],
+                             all_seasons=args.all_seasons, dry_run=args.dry_run)
             except Exception as e:
                 print(f"  {pid}: ERROR {e}")
     finally:

@@ -49,6 +49,9 @@ def main() -> None:
         if not pending:
             return
         print(f"[{datetime_now()}] {len(pending)} pending deep-dive request(s)", flush=True)
+        # Auto-link new/updated users first so queued requests (e.g. from signup)
+        # actually have identity links to deep-dive.
+        run([PYTHON, os.path.join(SCRIPT_DIR, "identity_link.py")])
         for req_id, user_id in pending:
             cur.execute(
                 "UPDATE deep_dive_requests SET status='RUNNING', started_at=NOW() WHERE id=%s",
