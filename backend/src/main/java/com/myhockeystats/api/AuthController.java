@@ -27,7 +27,7 @@ public class AuthController {
         try {
             User u = userService.register(req.email(), req.password(), req.fullName());
             String token = jwtUtil.generateToken(u.getEmail());
-            return ResponseEntity.ok(Map.of("token", token, "email", u.getEmail()));
+            return ResponseEntity.ok(Map.of("token", token, "email", u.getEmail(), "isAdmin", u.isAdmin()));
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
         }
@@ -37,7 +37,13 @@ public class AuthController {
     public ResponseEntity<?> login(@RequestBody LoginRequest req) {
         return userService.findByEmail(req.email())
                 .filter(u -> userService.verifyPassword(u, req.password()))
-                .map(u -> ResponseEntity.ok(Map.of("token", jwtUtil.generateToken(u.getEmail()), "email", u.getEmail())))
+                .map(u -> {
+                    userService.touchLastLogin(u);
+                    return ResponseEntity.ok(Map.of(
+                        "token", jwtUtil.generateToken(u.getEmail()),
+                        "email", u.getEmail(),
+                        "isAdmin", u.isAdmin()));
+                })
                 .orElseGet(() -> ResponseEntity.status(401).body(Map.of("error", "Invalid credentials")));
     }
 }

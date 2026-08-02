@@ -60,6 +60,11 @@ export const integrationsApi = {
     )
   },
 
+  // Admin: all registered players (registration desc) with last login + deep-dive
+  fetchAdminPlayers() {
+    return api.fetchWithAuth('/admin/players')
+  },
+
   fetchMyGameHistory(seasonYear) {
     const query = seasonYear ? `?seasonYear=${encodeURIComponent(seasonYear)}` : ''
     return api.fetchWithAuth(`/players/me/game-history${query}`)

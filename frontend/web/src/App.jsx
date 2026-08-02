@@ -10,6 +10,7 @@ import Dashboard from './pages/Dashboard'
 import Profile from './pages/Profile'
 import ParentPlayerHistoryPage from './pages/ParentPlayerHistoryPage'
 import IntegrationAdminPage from './pages/IntegrationAdminPage'
+import AdminPlayersPage from './pages/AdminPlayersPage'
 
 function AppRoutes() {
   const location = useLocation()
@@ -51,6 +52,14 @@ function AppRoutes() {
           element={
             <ProtectedRoute>
               <IntegrationAdminPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin"
+          element={
+            <ProtectedRoute>
+              <AdminPlayersPage />
             </ProtectedRoute>
           }
         />

@@ -5,6 +5,7 @@ import com.myhockeystats.repository.UserRepository;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
 import java.util.Optional;
 
 @Service
@@ -34,5 +35,10 @@ public class UserService {
 
     public boolean verifyPassword(User user, String rawPassword) {
         return passwordEncoder.matches(rawPassword, user.getPassword());
+    }
+
+    public void touchLastLogin(User user) {
+        user.setLastLoginAt(Instant.now());
+        userRepository.save(user);
     }
 }

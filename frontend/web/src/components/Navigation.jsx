@@ -26,6 +26,15 @@ export default function Navigation() {
         {user && (
           <div className="flex items-center space-x-4">
             <span className="text-slate-600">Welcome, {user.email}</span>
+            {user.isAdmin && (
+              <button
+                onClick={() => navigate('/admin')}
+                className="flex items-center space-x-2 text-slate-600 hover:text-slate-900 transition-colors"
+              >
+                <Trophy className="w-5 h-5" />
+                <span>Admin</span>
+              </button>
+            )}
             <button 
               onClick={() => navigate('/profile')}
               className="flex items-center space-x-2 text-slate-600 hover:text-slate-900 transition-colors"

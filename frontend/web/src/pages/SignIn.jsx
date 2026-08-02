@@ -27,7 +27,7 @@ export default function SignIn() {
     setLoading(true)
     try {
       const response = await api.login(email, password)
-      login(response.accessToken || response.token, { email })
+      login(response.accessToken || response.token, { email, isAdmin: !!response.isAdmin })
       navigate('/dashboard')
     } catch (err) {
       setError(err.message || 'Failed to sign in')

@@ -18,6 +18,12 @@ public class User {
 
     private String fullName;
 
+    @Column(name = "is_admin", nullable = false)
+    private boolean isAdmin = false;
+
+    @Column(name = "last_login_at")
+    private Instant lastLoginAt;
+
     private Instant createdAt = Instant.now();
 
     public Long getId() { return id; }
@@ -31,6 +37,12 @@ public class User {
 
     public String getFullName() { return fullName; }
     public void setFullName(String fullName) { this.fullName = fullName; }
+
+    public boolean isAdmin() { return isAdmin; }
+    public void setAdmin(boolean admin) { isAdmin = admin; }
+
+    public Instant getLastLoginAt() { return lastLoginAt; }
+    public void setLastLoginAt(Instant lastLoginAt) { this.lastLoginAt = lastLoginAt; }
 
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
