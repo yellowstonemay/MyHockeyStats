@@ -359,7 +359,24 @@ public class FollowController {
                     m.put("pim", pim == null ? 0 : ((Number) pim).intValue());
                     return m;
                 }, spid);
-            if (!season.isEmpty()) f.put("season", season.get(0));
+            if (!season.isEmpty()) {
+                f.put("season", season.get(0));
+            } else {
+                // No career stats yet — if the player is in the roster, show their
+                // current team + season with empty stats instead of "no data".
+                Map<String, Object> roster = latestRoster(source, spid);
+                if (!roster.isEmpty()) {
+                    Map<String, Object> empty = new HashMap<>();
+                    empty.put("season", roster.get("season"));
+                    empty.put("team", roster.get("team"));
+                    empty.put("games", null);
+                    empty.put("goals", null);
+                    empty.put("assists", null);
+                    empty.put("points", null);
+                    empty.put("pim", null);
+                    f.put("season", empty);
+                }
+            }
         } catch (Exception e) {
             // career table may not have a row yet; leave season null
         }
@@ -397,6 +414,37 @@ public class FollowController {
             f.put("recentGames", games);
         } catch (Exception e) {
             f.put("recentGames", List.of());
+        }
+    }
+
+    /** Latest roster row for a player (team + season) — used when no career stats exist. */
+    private Map<String, Object> latestRoster(String source, String spid) {
+        String[] meta = ROSTER.get(source);
+        if (meta == null) return Map.of();
+        String table = meta[0];
+        String seasonCol = meta[2];
+        try {
+            String sql = "SELECT team_name, " + seasonCol + " AS season " +
+                         "FROM " + table + " WHERE player_id = ? " +
+                         "ORDER BY season_year DESC LIMIT 1";
+            List<Map<String, Object>> rows = jdbcTemplate.query(sql,
+                (rs, rn) -> {
+                    Map<String, Object> m = new HashMap<>();
+                    m.put("team", rs.getString("team_name"));
+                    Object s = rs.getObject("season");
+                    if (s == null) {
+                        m.put("season", null);
+                    } else if (seasonCol.equals("season_year")) {
+                        int y = ((Number) s).intValue();
+                        m.put("season", y + "-" + (y + 1));
+                    } else {
+                        m.put("season", s.toString());
+                    }
+                    return m;
+                }, spid);
+            return rows.isEmpty() ? Map.of() : rows.get(0);
+        } catch (Exception e) {
+            return Map.of();
         }
     }
 }
