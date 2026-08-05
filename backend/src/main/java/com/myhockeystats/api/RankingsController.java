@@ -64,22 +64,36 @@ public class RankingsController {
     private List<Map<String, Object>> computeRankings(String source, String playerId) {
         String sql = switch (source) {
             case "AYHL" -> """
-                WITH r AS (
-                  SELECT source_player_id AS player_id, season_label AS season, team_name AS team,
-                         games_played AS games, goals, assists, points,
-                         RANK() OVER (PARTITION BY team_name, season_label ORDER BY points DESC, goals DESC, assists DESC) AS team_rank,
-                         COUNT(*) OVER (PARTITION BY team_name, season_label) AS team_size,
+                WITH roster AS (
+                  SELECT DISTINCT player_id, season_label, team_id, team_name FROM ayhl_roster
+                ),
+                team AS (
+                  SELECT c.source_player_id AS player_id, c.season_label AS season,
+                         COALESCE(r.team_id::text, c.team_name) AS team_key,
+                         COALESCE(r.team_name, c.team_name) AS team,
+                         c.games_played AS games, c.goals, c.assists, c.points,
+                         RANK() OVER (PARTITION BY COALESCE(r.team_id::text, c.team_name), c.season_label ORDER BY c.points DESC, c.goals DESC, c.assists DESC) AS team_rank,
+                         COUNT(*) OVER (PARTITION BY COALESCE(r.team_id::text, c.team_name), c.season_label) AS team_size
+                  FROM ayhl_player_career c
+                  LEFT JOIN roster r ON r.player_id = c.source_player_id AND r.season_label = c.season_label
+                ),
+                league AS (
+                  SELECT source_player_id AS player_id, season_label AS season,
                          RANK() OVER (PARTITION BY season_label ORDER BY points DESC, goals DESC, assists DESC) AS league_rank,
                          COUNT(*) OVER (PARTITION BY season_label) AS league_size
                   FROM ayhl_player_career
                 )
-                SELECT * FROM r WHERE player_id = ? ORDER BY season DESC""";
+                SELECT t.player_id, t.season, t.team_key, t.team, t.games, t.goals, t.assists, t.points,
+                       t.team_rank, t.team_size, l.league_rank, l.league_size
+                FROM team t
+                JOIN league l ON l.player_id = t.player_id AND l.season = t.season
+                WHERE t.player_id = ? ORDER BY t.season DESC""";
             case "THF" -> """
                 WITH r AS (
-                  SELECT player_id, season_year::text AS season, team_name AS team,
-                         gp AS games, goals, assists, points,
-                         RANK() OVER (PARTITION BY team_name, season_year ORDER BY points DESC, goals DESC, assists DESC) AS team_rank,
-                         COUNT(*) OVER (PARTITION BY team_name, season_year) AS team_size,
+                  SELECT player_id, season_year::text AS season, team_id::text AS team_key,
+                         team_name AS team, gp AS games, goals, assists, points,
+                         RANK() OVER (PARTITION BY team_id, season_year ORDER BY points DESC, goals DESC, assists DESC) AS team_rank,
+                         COUNT(*) OVER (PARTITION BY team_id, season_year) AS team_size,
                          RANK() OVER (PARTITION BY season_year ORDER BY points DESC, goals DESC, assists DESC) AS league_rank,
                          COUNT(*) OVER (PARTITION BY season_year) AS league_size
                   FROM thf_rosters
@@ -87,10 +101,10 @@ public class RankingsController {
                 SELECT * FROM r WHERE player_id = ? ORDER BY season DESC""";
             case "AHF" -> """
                 WITH r AS (
-                  SELECT player_id, season_year::text AS season, team_name AS team,
-                         gp AS games, goals, assists, points,
-                         RANK() OVER (PARTITION BY team_name, season_year ORDER BY points DESC, goals DESC, assists DESC) AS team_rank,
-                         COUNT(*) OVER (PARTITION BY team_name, season_year) AS team_size,
+                  SELECT player_id, season_year::text AS season, team_id::text AS team_key,
+                         team_name AS team, gp AS games, goals, assists, points,
+                         RANK() OVER (PARTITION BY team_id, season_year ORDER BY points DESC, goals DESC, assists DESC) AS team_rank,
+                         COUNT(*) OVER (PARTITION BY team_id, season_year) AS team_size,
                          RANK() OVER (PARTITION BY season_year ORDER BY points DESC, goals DESC, assists DESC) AS league_rank,
                          COUNT(*) OVER (PARTITION BY season_year) AS league_size
                   FROM ahf_rosters
@@ -98,7 +112,8 @@ public class RankingsController {
                 SELECT * FROM r WHERE player_id = ? ORDER BY season DESC""";
             case "NJHS" -> """
                 WITH r AS (
-                  SELECT s.player_id, s.season_year::text AS season, s.team_name AS team,
+                  SELECT s.player_id, s.season_year::text AS season, s.team_name AS team_key,
+                         s.team_name AS team,
                          c.games_played AS games, s.goals, s.assists, s.points,
                          RANK() OVER (PARTITION BY s.team_name, s.season_year ORDER BY s.points DESC, s.goals DESC, s.assists DESC) AS team_rank,
                          COUNT(*) OVER (PARTITION BY s.team_name, s.season_year) AS team_size,
