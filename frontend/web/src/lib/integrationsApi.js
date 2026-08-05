@@ -118,4 +118,27 @@ export const integrationsApi = {
     const query = seasonYear ? `?seasonYear=${encodeURIComponent(seasonYear)}` : ''
     return api.fetchWithAuth(`/players/me/game-history${query}`)
   },
+
+  // ── Follow a player ──────────────────────────────────────────────────────
+  fetchFollows() {
+    return api.fetchWithAuth('/follows')
+  },
+
+  searchFollows(q) {
+    return api.fetchWithAuth(`/follows/search?q=${encodeURIComponent(q)}`)
+  },
+
+  addFollow(data) {
+    return api.fetchWithAuth('/follows', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+  },
+
+  deleteFollow(id) {
+    return api.fetchWithAuth(`/follows/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    })
+  },
 }

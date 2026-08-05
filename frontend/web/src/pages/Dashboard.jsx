@@ -6,6 +6,7 @@ import { integrationsApi } from '../lib/integrationsApi'
 import SeasonsTab from '../components/PlayerProfile/SeasonsTab'
 import StatisticsTab from '../components/StatisticsTab'
 import MyLeagues from '../components/MyLeagues'
+import FollowingTab from '../components/FollowingTab'
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState('overview')
@@ -143,6 +144,7 @@ export default function Dashboard() {
                     { id: 'seasons', label: 'Seasons', icon: '🏒' },
                     { id: 'games', label: 'Game History', icon: '📝' },
                     { id: 'stats', label: 'Statistics', icon: '📈' },
+                    { id: 'following', label: 'Following', icon: '👥' },
                     { id: 'export', label: 'Export', icon: '📄' },
                   ].map((item) => (
                     <button
@@ -385,6 +387,10 @@ export default function Dashboard() {
 
             {activeTab === 'stats' && (
               <StatisticsTab seasonRecords={seasonRecords} />
+            )}
+
+            {activeTab === 'following' && (
+              <FollowingTab />
             )}
 
             {activeTab === 'export' && (

@@ -58,7 +58,7 @@ echo ""
 
 # ─── Step 1: Identity auto-link ───────────────────────────────────────────
 echo "─────────────────────────────────────────────────────────────────────────"
-echo "  [1/4] Identity auto-link (registered users -> source players)"
+echo "  [1/5] Identity auto-link (registered users -> source players)"
 echo "─────────────────────────────────────────────────────────────────────────"
 cd "$SCRIPT_DIR"
 $PYTHON identity_link.py $DRY 2>&1 | tee -a "$LOG_DIR/deep-dive.log"
@@ -66,25 +66,32 @@ echo ""
 
 # ─── Step 2: AYHL deep dive (full career backfill) ────────────────────────
 echo "─────────────────────────────────────────────────────────────────────────"
-echo "  [2/4] AYHL deep dive (full career history + change detection)"
+echo "  [2/5] AYHL deep dive (full career history + change detection)"
 echo "─────────────────────────────────────────────────────────────────────────"
 $PYTHON ayhl_deep.py $DRY 2>&1 | tee -a "$LOG_DIR/deep-dive.log"
 echo ""
 
 # ─── Step 3: THF/AHF deep dive (latest roster -> career) ──────────────────
 echo "─────────────────────────────────────────────────────────────────────────"
-echo "  [3/4] THF/AHF deep dive (latest roster stats -> career)"
+echo "  [3/5] THF/AHF deep dive (latest roster stats -> career)"
 echo "─────────────────────────────────────────────────────────────────────────"
 $PYTHON thf_ahf_deep.py $DRY 2>&1 | tee -a "$LOG_DIR/deep-dive.log"
 echo ""
 
 # ─── Step 4: NJ.com HS hockey (roster refresh + career/games) ─────────────
 echo "─────────────────────────────────────────────────────────────────────────"
-echo "  [4/4] NJ.com high school hockey (roster refresh + career/games + rankings)"
+echo "  [4/5] NJ.com high school hockey (roster refresh + career/games + rankings)"
 echo "─────────────────────────────────────────────────────────────────────────"
 $PYTHON njhs_deep.py --roster $DRY 2>&1 | tee -a "$LOG_DIR/deep-dive.log"
 $PYTHON njhs_deep.py --stats $DRY 2>&1 | tee -a "$LOG_DIR/deep-dive.log"
 $PYTHON njhs_deep.py $DRY 2>&1 | tee -a "$LOG_DIR/deep-dive.log"
+echo ""
+
+# ─── Step 5: Followed players (recent performance) ─────────────────────
+echo "─────────────────────────────────────────────────────────────────────────"
+echo "  [5/5] Followed players"
+echo "─────────────────────────────────────────────────────────────────────────"
+$PYTHON follows_deep.py $DRY 2>&1 | tee -a "$LOG_DIR/deep-dive.log"
 echo ""
 
 echo "╔═══════════════════════════════════════════════════════════════╗"
