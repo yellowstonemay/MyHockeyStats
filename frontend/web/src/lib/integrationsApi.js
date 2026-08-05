@@ -147,4 +147,27 @@ export const integrationsApi = {
     const qs = limit ? `?limit=${limit}` : ''
     return api.fetchWithAuth(`/follows/activity${qs}`)
   },
+
+  // ── Support / report to admin ───────────────────────────────────────────
+  sendSupportMessage(data) {
+    return api.fetchWithAuth('/support/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+  },
+
+  fetchMySupportMessages() {
+    return api.fetchWithAuth('/support/messages')
+  },
+
+  fetchAdminMessages() {
+    return api.fetchWithAuth('/admin/messages')
+  },
+
+  resolveAdminMessage(id) {
+    return api.fetchWithAuth(`/admin/messages/${encodeURIComponent(id)}/resolve`, {
+      method: 'POST',
+    })
+  },
 }

@@ -3,7 +3,7 @@ import { useAuth } from '../lib/AuthContext'
 import { integrationsApi } from '../lib/integrationsApi'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/Card'
 import { Button } from '../components/Button'
-import { AlertCircle, Loader2, RefreshCw, Radar } from 'lucide-react'
+import { AlertCircle, Loader2, RefreshCw, Radar, Inbox } from 'lucide-react'
 
 function fmt(ts) {
   if (!ts) return '—'
@@ -27,6 +27,41 @@ export default function AdminPlayersPage() {
   const [isAdmin, setIsAdmin] = useState(!!user?.isAdmin)
   const [triggeringId, setTriggeringId] = useState(null)
   const [actionMsg, setActionMsg] = useState(null)
+
+  const [messages, setMessages] = useState([])
+  const [messagesLoading, setMessagesLoading] = useState(false)
+  const [messagesError, setMessagesError] = useState('')
+  const [resolvingId, setResolvingId] = useState(null)
+
+  const loadMessages = async () => {
+    setMessagesLoading(true)
+    setMessagesError('')
+    try {
+      const resp = await integrationsApi.fetchAdminMessages()
+      setMessages(resp.messages || [])
+    } catch (err) {
+      setMessagesError(err.message || 'Failed to load messages')
+    } finally {
+      setMessagesLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (isAdmin) loadMessages()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin])
+
+  const resolveMsg = async (id) => {
+    setResolvingId(id)
+    try {
+      await integrationsApi.resolveAdminMessage(id)
+      await loadMessages()
+    } catch (err) {
+      setMessagesError(err.message || 'Failed to resolve message')
+    } finally {
+      setResolvingId(null)
+    }
+  }
 
   useEffect(() => {
     setIsAdmin(!!user?.isAdmin)
@@ -175,6 +210,59 @@ export default function AdminPlayersPage() {
                   </tbody>
                 </table>
               </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {isAdmin && (
+          <Card className="mt-6">
+            <CardHeader>
+              <CardTitle>
+                <span className="inline-flex items-center gap-2">
+                  <Inbox className="w-4 h-4" />
+                  Support Messages ({messages.filter((m) => m.status === 'NEW').length} new)
+                </span>
+              </CardTitle>
+              <CardDescription>Reports from users about incorrect data, missing seasons, etc.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {messagesLoading ? (
+                <div className="flex items-center justify-center py-6 text-slate-500">
+                  <Loader2 className="w-4 h-4 animate-spin mr-2" /> Loading messages...
+                </div>
+              ) : messagesError ? (
+                <p className="text-sm text-red-700 py-4">{messagesError}</p>
+              ) : messages.length === 0 ? (
+                <p className="text-sm text-slate-500 text-center py-6">No messages yet.</p>
+              ) : (
+                <div className="space-y-3">
+                  {messages.map((m) => (
+                    <div key={m.id} className={`border rounded-lg p-3 ${m.status === 'NEW' ? 'border-amber-300 bg-amber-50/50' : 'border-slate-200'}`}>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${m.status === 'NEW' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'}`}>
+                            {m.status === 'NEW' ? 'New' : 'Resolved'}
+                          </span>
+                          <span className="text-xs text-slate-500 truncate">
+                            {m.email}{m.userName ? ` (${m.userName})` : ''}
+                          </span>
+                        </div>
+                        <span className="text-[11px] text-slate-400 whitespace-nowrap">{fmt(m.createdAt)}</span>
+                      </div>
+                      <div className="mt-1 text-xs font-medium text-slate-700">{m.category}</div>
+                      <p className="mt-1 text-sm text-slate-700 whitespace-pre-wrap">{m.message}</p>
+                      {m.status === 'NEW' && (
+                        <div className="mt-2">
+                          <Button size="sm" variant="outline" onClick={() => resolveMsg(m.id)} disabled={resolvingId === m.id}>
+                            {resolvingId === m.id ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : null}
+                            Mark resolved
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
         )}

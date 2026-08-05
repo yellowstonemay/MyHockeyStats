@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { Button } from '../components/Button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/Card'
-import { AlertCircle, Loader2, RefreshCw } from 'lucide-react'
+import { AlertCircle, Loader2, RefreshCw, MessageSquare } from 'lucide-react'
 import { integrationsApi } from '../lib/integrationsApi'
 import SeasonsTab from '../components/PlayerProfile/SeasonsTab'
 import StatisticsTab from '../components/StatisticsTab'
@@ -18,6 +18,8 @@ const DASH_TABS = [
   { id: 'export', label: 'Export', short: 'Export', icon: '📄' },
 ]
 
+const SUPPORT_CATEGORIES = ['Incorrect data', 'Missing season', 'Wrong player link', 'Other']
+
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState('overview')
   const [seasonRecords, setSeasonRecords] = useState([])
@@ -26,6 +28,28 @@ export default function Dashboard() {
   const [editingKey, setEditingKey] = useState(null)
   const [editValues, setEditValues] = useState({})
   const [saving, setSaving] = useState(false)
+
+  // ── Report a problem to the admin ────────────────────────────────────────
+  const [supportCategory, setSupportCategory] = useState('')
+  const [supportText, setSupportText] = useState('')
+  const [sendingSupport, setSendingSupport] = useState(false)
+  const [supportMsg, setSupportMsg] = useState(null)
+
+  const handleSupportSubmit = async (e) => {
+    e.preventDefault()
+    setSendingSupport(true)
+    setSupportMsg(null)
+    try {
+      const resp = await integrationsApi.sendSupportMessage({ category: supportCategory, message: supportText })
+      setSupportMsg({ kind: 'ok', text: resp.message })
+      setSupportCategory('')
+      setSupportText('')
+    } catch (err) {
+      setSupportMsg({ kind: 'err', text: err.message || 'Failed to send report' })
+    } finally {
+      setSendingSupport(false)
+    }
+  }
 
   const getSeasonStartYear = (seasonValue) => {
     if (seasonValue == null) return 0
@@ -269,18 +293,42 @@ export default function Dashboard() {
 
                 <Card>
                   <CardHeader>
-                    <CardTitle>Quick Actions</CardTitle>
+                    <CardTitle>Report a Problem</CardTitle>
+                    <CardDescription>
+                      Spotted incorrect data, a missing season, or a wrong player link? Let the admin know.
+                    </CardDescription>
                   </CardHeader>
-                  <CardContent className="flex flex-col sm:flex-row gap-4">
-                    <Button variant="primary" className="flex-1">
-                      Add Season
-                    </Button>
-                    <Button variant="secondary" className="flex-1">
-                      Record Game
-                    </Button>
-                    <Button variant="outline" className="flex-1">
-                      Export Stats
-                    </Button>
+                  <CardContent>
+                    {supportMsg && (
+                      <div className={`mb-3 p-3 border rounded-md text-sm ${supportMsg.kind === 'ok' ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : 'bg-red-100 border-red-400 text-red-700'}`}>
+                        {supportMsg.text}
+                      </div>
+                    )}
+                    <form onSubmit={handleSupportSubmit} className="space-y-3">
+                      <select
+                        value={supportCategory}
+                        onChange={(e) => setSupportCategory(e.target.value)}
+                        className="w-full h-10 rounded-md border border-slate-200 bg-white px-3 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
+                        required
+                      >
+                        <option value="" disabled>Choose a category…</option>
+                        {SUPPORT_CATEGORIES.map((c) => (
+                          <option key={c} value={c}>{c}</option>
+                        ))}
+                      </select>
+                      <textarea
+                        value={supportText}
+                        onChange={(e) => setSupportText(e.target.value)}
+                        placeholder="What's wrong? e.g. My 2024-25 season is missing a game, or a stat looks off…"
+                        rows={3}
+                        className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-base placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
+                        required
+                      />
+                      <Button type="submit" disabled={sendingSupport || !supportCategory || supportText.trim().length < 3}>
+                        {sendingSupport ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <MessageSquare className="w-4 h-4 mr-2" />}
+                        Send to admin
+                      </Button>
+                    </form>
                   </CardContent>
                 </Card>
               </div>

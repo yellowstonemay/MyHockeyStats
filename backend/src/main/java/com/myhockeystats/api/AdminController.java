@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -103,5 +104,47 @@ public class AdminController {
         return ResponseEntity.ok(Map.of(
             "message", "Full (all-seasons) deep-dive queued for user " + userId + ".",
             "queued", true));
+    }
+
+    /** GET /api/admin/messages — all support/report messages, NEW first. */
+    @GetMapping("/messages")
+    public ResponseEntity<?> listSupportMessages(
+            @RequestHeader(value = "Authorization", required = false) String authHeader) {
+        if (resolveAdmin(authHeader).isEmpty()) {
+            return ResponseEntity.status(403).body(Map.of("error", "Admin access required"));
+        }
+        List<Map<String, Object>> messages = jdbcTemplate.query(
+            "SELECT m.id::text, m.user_id, u.email, u.full_name AS user_name, " +
+            "       m.category, m.message, m.status, m.created_at " +
+            "FROM support_messages m JOIN users u ON u.id = m.user_id " +
+            "ORDER BY (m.status = 'NEW') DESC, m.created_at DESC",
+            (rs, rn) -> {
+                Map<String, Object> m = new HashMap<>();
+                m.put("id", rs.getString("id"));
+                m.put("email", rs.getString("email"));
+                m.put("userName", rs.getString("user_name"));
+                m.put("category", rs.getString("category"));
+                m.put("message", rs.getString("message"));
+                m.put("status", rs.getString("status"));
+                m.put("createdAt", rs.getTimestamp("created_at") == null ? null : rs.getTimestamp("created_at").toInstant().toString());
+                return m;
+            });
+        return ResponseEntity.ok(Map.of("messages", messages));
+    }
+
+    /** POST /api/admin/messages/{id}/resolve — mark a report resolved. */
+    @PostMapping("/messages/{id}/resolve")
+    public ResponseEntity<?> resolveSupportMessage(
+            @PathVariable String id,
+            @RequestHeader(value = "Authorization", required = false) String authHeader) {
+        if (resolveAdmin(authHeader).isEmpty()) {
+            return ResponseEntity.status(403).body(Map.of("error", "Admin access required"));
+        }
+        int updated = jdbcTemplate.update(
+            "UPDATE support_messages SET status = 'RESOLVED' WHERE id = ?::uuid", id);
+        if (updated == 0) {
+            return ResponseEntity.status(404).body(Map.of("error", "Message not found"));
+        }
+        return ResponseEntity.ok(Map.of("message", "Marked resolved"));
     }
 }
