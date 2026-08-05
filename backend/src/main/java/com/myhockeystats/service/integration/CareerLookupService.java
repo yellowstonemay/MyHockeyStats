@@ -10,8 +10,11 @@ import com.myhockeystats.repository.integration.ThfPlayerCareerRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.*;
@@ -38,6 +41,9 @@ public class CareerLookupService {
     
     @Autowired
     private AhfPlayerCareerRepository ahfRepo;
+    
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
     
     /**
      * Normalize player name for lookup.
@@ -121,6 +127,7 @@ public class CareerLookupService {
         allRecords.addAll(toSeasonDtosFromAyhl(ayhlRecords, "AYHL"));
         allRecords.addAll(toSeasonDtosFromThf(thfRecords, "THF"));
         allRecords.addAll(toSeasonDtosFromAhf(ahfRecords, "AHF"));
+        allRecords.addAll(toSeasonDtosFromNjhs(canonicalNames));
         
         // Sort by season DESC, then source ASC
         allRecords.sort(Comparator
@@ -137,7 +144,7 @@ public class CareerLookupService {
         Set<String> availableSources = allRecords.stream()
             .map(IntegrationDtos.SeasonCareerRecordDto::source)
             .collect(Collectors.toSet());
-        Set<String> emptySources = Stream.of("AYHL", "THF", "AHF")
+        Set<String> emptySources = Stream.of("AYHL", "THF", "AHF", "NJHS")
             .filter(s -> !availableSources.contains(s))
             .collect(Collectors.toSet());
         
@@ -253,9 +260,56 @@ public class CareerLookupService {
             false,
             null,
             Collections.emptySet(),
-            Stream.of("AYHL", "THF", "AHF").collect(Collectors.toSet()),
+            Stream.of("AYHL", "THF", "AHF", "NJHS").collect(Collectors.toSet()),
             OffsetDateTime.now(ZoneOffset.UTC),
             "private, max-age=300"
+        );
+    }
+
+    /**
+     * NJ.com high school hockey career records (njhs_player_career), queried via
+     * JDBC so we don't need a full JPA entity/repository for this source.
+     */
+    private List<IntegrationDtos.SeasonCareerRecordDto> toSeasonDtosFromNjhs(
+            Collection<String> canonicalNames) {
+        if (canonicalNames.isEmpty()) {
+            return Collections.emptyList();
+        }
+        String placeholders = canonicalNames.stream().map(x -> "?").collect(Collectors.joining(","));
+        String sql = "SELECT source_player_id, player_name, season_label, league_name, team_name, " +
+                "games_played, goals, assists, points, is_user_modified, created_at " +
+                "FROM njhs_player_career " +
+                "WHERE regexp_replace(lower(COALESCE(player_name, '')), '[[:space:],.''-]', '', 'g') IN (" + placeholders + ")";
+        List<String> params = canonicalNames.stream().toList();
+        return jdbcTemplate.query(sql, ps -> {
+            for (int i = 0; i < params.size(); i++) {
+                ps.setString(i + 1, params.get(i));
+            }
+        }, this::mapNjhsRecord);
+    }
+
+    private IntegrationDtos.SeasonCareerRecordDto mapNjhsRecord(ResultSet rs, int rowNum) throws SQLException {
+        OffsetDateTime created = rs.getTimestamp("created_at") != null
+                ? rs.getTimestamp("created_at").toInstant().atOffset(ZoneOffset.UTC)
+                : null;
+        return new IntegrationDtos.SeasonCareerRecordDto(
+            "NJHS",
+            rs.getString("source_player_id"),
+            rs.getString("player_name"),
+            rs.getString("season_label"),
+            rs.getString("league_name"),
+            rs.getString("team_name"),
+            null,                                  // jerseyNumber (not tracked)
+            rs.getObject("games_played") != null ? rs.getInt("games_played") : null,
+            rs.getObject("goals") != null ? rs.getInt("goals") : null,
+            rs.getObject("assists") != null ? rs.getInt("assists") : null,
+            rs.getObject("points") != null ? rs.getInt("points") : null,
+            null,                                  // penalties (not tracked)
+            null,                                  // pim (not tracked)
+            rs.getBoolean("is_user_modified"),
+            created,
+            false,
+            null
         );
     }
 }

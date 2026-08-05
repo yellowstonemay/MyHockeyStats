@@ -166,7 +166,7 @@ export default function SeasonsTab() {
       <CardHeader>
         <CardTitle>Game History & Career Statistics</CardTitle>
         <CardDescription>
-          View per-game history across AYHL, THF, and AHF for the selected season
+          View per-game history across AYHL, THF, AHF, and NJHS for the selected season
         </CardDescription>
       </CardHeader>
       <CardContent>

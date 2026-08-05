@@ -32,10 +32,13 @@ from typing import Optional
 import psycopg2
 import psycopg2.extras
 
+import njhs_guard
+
 SOURCE_TABLES = {
     "AYHL": "ayhl_player_career",
     "THF": "thf_player_career",
     "AHF": "ahf_player_career",
+    "NJHS": "njhs_player_career",
 }
 
 # Raw roster tables + their player-name column. Used as a fallback so players
@@ -45,6 +48,7 @@ ROSTER_TABLES = {
     "AYHL": ("ayhl_roster", "player_name_raw"),
     "THF": ("thf_rosters", "player_name"),
     "AHF": ("ahf_rosters", "player_name"),
+    "NJHS": ("njhs_rosters", "player_name"),
 }
 
 _PUNCT = re.compile(r"['\-.]+")
@@ -86,7 +90,7 @@ def get_conn():
 def load_users(conn, email_filter: Optional[str] = None) -> list[dict]:
     sql = """
         SELECT u.id AS user_id, u.email, u.full_name AS user_name,
-               pp.full_name AS profile_name, pp.birthdate
+               pp.full_name AS profile_name, pp.birthdate, pp.location
         FROM users u
         LEFT JOIN player_profiles pp ON pp.user_id = u.id
     """
@@ -106,6 +110,7 @@ def load_users(conn, email_filter: Optional[str] = None) -> list[dict]:
             "email": r["email"],
             "full_name": full_name,
             "birthdate": r["birthdate"],
+            "location": r["location"],
         })
     return out
 
@@ -196,6 +201,13 @@ def main() -> None:
                 continue
             print(f"  user {u['user_id']} ({u['email']}) '{u['full_name']}' keys={keys}")
             for source in SOURCE_TABLES:
+                # NJ HS deep-dive is only for high-school-age players who live
+                # in New Jersey (avoid matching same-name players elsewhere).
+                if source == "NJHS":
+                    ok, reason = njhs_guard.qualifies_for_njhs(u["birthdate"], u["location"])
+                    if not ok:
+                        print(f"    NJHS: skipped ({reason})")
+                        continue
                 cands = find_candidates(conn, source, keys)
                 if not cands:
                     # No career record — try the raw roster (players without stats).

@@ -21,7 +21,8 @@ public class GameHistoryLookupService {
     private static final Map<String, String> SOURCE_TABLES = Map.of(
         "AYHL", "ayhl_player_games",
         "THF", "thf_player_games",
-        "AHF", "ahf_player_games"
+        "AHF", "ahf_player_games",
+        "NJHS", "njhs_player_games"
     );
 
     private final JdbcTemplate jdbcTemplate;

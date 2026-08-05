@@ -258,6 +258,7 @@ public class SeasonsController {
             case "AYHL" -> "ayhl_player_career";
             case "THF" -> "thf_player_career";
             case "AHF" -> "ahf_player_career";
+            case "NJHS" -> "njhs_player_career";
             default -> null;
         };
         if (table == null) {

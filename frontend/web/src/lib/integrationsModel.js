@@ -2,6 +2,7 @@ export const IntegrationSource = {
   THF: 'THF',
   AYHL: 'AYHL',
   AHF: 'AHF',
+  NJHS: 'NJHS',
 }
 
 export const MatchStatus = {
