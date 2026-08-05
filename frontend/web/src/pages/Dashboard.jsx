@@ -4,6 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../co
 import { AlertCircle, Loader2, RefreshCw } from 'lucide-react'
 import { integrationsApi } from '../lib/integrationsApi'
 import SeasonsTab from '../components/PlayerProfile/SeasonsTab'
+import StatisticsTab from '../components/StatisticsTab'
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState('overview')
@@ -121,7 +122,7 @@ export default function Dashboard() {
   }, [])
 
   useEffect(() => {
-    if (activeTab === 'seasons' && seasonRecords.length === 0 && !seasonsLoading && !seasonsError) {
+    if ((activeTab === 'seasons' || activeTab === 'stats') && seasonRecords.length === 0 && !seasonsLoading && !seasonsError) {
       loadSeasons()
     }
   }, [activeTab, seasonRecords.length, seasonsLoading, seasonsError])
@@ -380,17 +381,7 @@ export default function Dashboard() {
             )}
 
             {activeTab === 'stats' && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Statistics</CardTitle>
-                  <CardDescription>Your career statistics and trends</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-slate-600 text-center py-8">
-                    Add some games to see your statistics and performance trends.
-                  </p>
-                </CardContent>
-              </Card>
+              <StatisticsTab seasonRecords={seasonRecords} />
             )}
 
             {activeTab === 'export' && (
