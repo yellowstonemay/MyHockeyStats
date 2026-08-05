@@ -87,10 +87,12 @@ def main() -> None:
                 cur.execute(
                     "UPDATE deep_dive_requests SET status='COMPLETED', completed_at=NOW() WHERE id=%s",
                     (req_id,))
-            # Deep-dive finished — clear the "stats being retrieved" notification
+            # Deep-dive finished — clear the "stats being retrieved" notification.
+            # DELETE (not UPDATE->RESOLVED) so repeat refreshes don't collide with
+            # the (user_id, type, status) unique constraint.
             cur.execute(
-                "UPDATE notifications SET status='RESOLVED', resolved_at=NOW() "
-                "WHERE user_id=%s AND type='DEEP_DIVE' AND status='ACTIVE'", (user_id,))
+                "DELETE FROM notifications WHERE user_id=%s AND type='DEEP_DIVE' AND status='ACTIVE'",
+                (user_id,))
             conn.commit()
             print(f"[{req_id}] user {user_id}: {'FAILED - ' + error if error else 'COMPLETED'}", flush=True)
     finally:
