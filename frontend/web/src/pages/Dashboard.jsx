@@ -9,6 +9,15 @@ import MyLeagues from '../components/MyLeagues'
 import FollowingTab from '../components/FollowingTab'
 import ActivityFeed from '../components/ActivityFeed'
 
+const DASH_TABS = [
+  { id: 'overview', label: 'Overview', short: 'Home', icon: '📊' },
+  { id: 'seasons', label: 'Seasons', short: 'Seasons', icon: '🏒' },
+  { id: 'games', label: 'Game History', short: 'Games', icon: '📝' },
+  { id: 'stats', label: 'Statistics', short: 'Stats', icon: '📈' },
+  { id: 'following', label: 'Following', short: 'Following', icon: '👥' },
+  { id: 'export', label: 'Export', short: 'Export', icon: '📄' },
+]
+
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState('overview')
   const [seasonRecords, setSeasonRecords] = useState([])
@@ -133,25 +142,18 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen bg-slate-50">
       {/* Sidebar & Content */}
-      <div className="container py-8">
+      <div className="container py-8 pb-24 lg:pb-8">
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
-          {/* Sidebar */}
-          <div className="lg:col-span-1">
+          {/* Sidebar (desktop only; mobile uses the fixed bottom nav) */}
+          <div className="hidden lg:block lg:col-span-1">
             <Card>
               <CardContent className="p-0">
-                <nav className="flex flex-nowrap overflow-x-auto lg:flex-col">
-                  {[
-                    { id: 'overview', label: 'Overview', icon: '📊' },
-                    { id: 'seasons', label: 'Seasons', icon: '🏒' },
-                    { id: 'games', label: 'Game History', icon: '📝' },
-                    { id: 'stats', label: 'Statistics', icon: '📈' },
-                    { id: 'following', label: 'Following', icon: '👥' },
-                    { id: 'export', label: 'Export', icon: '📄' },
-                  ].map((item) => (
+                <nav className="flex flex-col">
+                  {DASH_TABS.map((item) => (
                     <button
                       key={item.id}
                       onClick={() => setActiveTab(item.id)}
-                      className={`flex items-center space-x-3 px-4 py-3 border-b border-slate-200 last:border-b-0 text-left transition-colors whitespace-nowrap shrink-0 ${
+                      className={`flex items-center space-x-3 px-4 py-3 border-b border-slate-200 last:border-b-0 text-left transition-colors ${
                         activeTab === item.id
                           ? 'bg-primary-50 text-primary-600 font-medium border-l-4 border-primary-600'
                           : 'text-slate-600 hover:bg-slate-50'
@@ -415,6 +417,24 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      {/* Mobile bottom nav */}
+      <nav className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-white border-t border-slate-200 pb-[env(safe-area-inset-bottom)]">
+        <div className="flex">
+          {DASH_TABS.map((item) => (
+            <button
+              key={item.id}
+              onClick={() => setActiveTab(item.id)}
+              className={`flex-1 flex flex-col items-center justify-center h-14 gap-0.5 text-[10px] font-medium transition-colors ${
+                activeTab === item.id ? 'text-primary-600' : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              <span className="text-lg leading-none">{item.icon}</span>
+              <span>{item.short}</span>
+            </button>
+          ))}
+        </div>
+      </nav>
     </div>
   )
 }

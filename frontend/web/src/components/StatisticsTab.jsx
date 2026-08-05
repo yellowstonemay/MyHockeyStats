@@ -330,7 +330,7 @@ export default function StatisticsTab({ seasonRecords }) {
           <CardDescription>Career milestones and hot streaks</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             <div className="border border-slate-200 rounded-lg p-3">
               <div className="text-xs text-slate-500">Next milestone</div>
               {milestones.points ? (
@@ -375,11 +375,11 @@ export default function StatisticsTab({ seasonRecords }) {
             <CardDescription>Goals, assists, and points per season (all leagues combined)</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="h-72">
+            <div className="h-48 sm:h-72">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={seasonTrends} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis dataKey="label" tick={{ fontSize: 12 }} />
+                  <XAxis dataKey="label" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
                   <YAxis tick={{ fontSize: 12 }} />
                   <Tooltip />
                   <Legend wrapperStyle={{ fontSize: 12 }} />
@@ -409,7 +409,38 @@ export default function StatisticsTab({ seasonRecords }) {
           ) : rankings.length === 0 ? (
             <p className="text-sm text-slate-500 text-center py-6">No ranking data yet.</p>
           ) : (
-            <div className="overflow-x-auto">
+            <>
+            {/* Mobile cards */}
+            <div className="sm:hidden space-y-3">
+              {rankings.map((r, i) => (
+                <div key={i} className="border border-slate-200 rounded-lg p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="font-medium text-slate-900 text-sm truncate">{r.team || '—'}</div>
+                    <span className="text-xs text-slate-500 whitespace-nowrap">{SOURCE_LABELS[r.source] || r.source} · {r.games ?? '—'} GP</span>
+                  </div>
+                  <div className="text-xs text-slate-500 mt-0.5">{r.season} · {r.points ?? '—'} PTS</div>
+                  <div className="mt-2 space-y-1.5">
+                    <button
+                      onClick={() => openTeam(r)}
+                      className="block w-full text-left rounded hover:bg-indigo-50 p-0.5 -m-0.5 transition-colors"
+                      title="View team roster"
+                    >
+                      <div className="text-[11px] text-slate-400 mb-0.5">Team rank</div>
+                      <RankBar rank={r.teamRank} size={r.teamSize} pct={r.teamPercentile} />
+                    </button>
+                    <div>
+                      <div className="text-[11px] text-slate-400 mb-0.5">League rank</div>
+                      <RankBar rank={r.leagueRank} size={r.leagueSize} pct={r.leaguePercentile} />
+                    </div>
+                  </div>
+                </div>
+              ))}
+              <p className="text-[11px] text-slate-400">
+                Percentile = % of players you outrank (higher is better). Ties share the same rank.
+              </p>
+            </div>
+            {/* Desktop table */}
+            <div className="hidden sm:block overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-slate-500 border-b border-slate-200">
@@ -450,6 +481,7 @@ export default function StatisticsTab({ seasonRecords }) {
                 Percentile = % of players you outrank (higher is better). Ties share the same rank.
               </p>
             </div>
+            </>
           )}
         </CardContent>
       </Card>
@@ -478,11 +510,11 @@ export default function StatisticsTab({ seasonRecords }) {
           {perGameChart.length === 0 ? (
             <p className="text-slate-500 text-sm text-center py-8">No game-by-game data yet.</p>
           ) : (
-            <div className="h-64">
+            <div className="h-48 sm:h-64">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={perGameChart} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis dataKey="idx" tick={{ fontSize: 11 }} label={{ value: 'Game', position: 'insideBottom', offset: -2, fontSize: 11 }} />
+                  <XAxis dataKey="idx" tick={{ fontSize: 11 }} interval="preserveStartEnd" label={{ value: 'Game', position: 'insideBottom', offset: -2, fontSize: 11 }} />
                   <YAxis tick={{ fontSize: 11 }} />
                   <Tooltip
                     labelFormatter={(v, p) => {
