@@ -33,6 +33,9 @@ export default function StatisticsTab({ seasonRecords }) {
   const [loadingGames, setLoadingGames] = useState(true)
   const [gamesError, setGamesError] = useState('')
   const [selectedSeason, setSelectedSeason] = useState('')
+  const [rankings, setRankings] = useState([])
+  const [loadingRankings, setLoadingRankings] = useState(true)
+  const [rankingsError, setRankingsError] = useState('')
 
   useEffect(() => {
     let cancelled = false
@@ -53,6 +56,17 @@ export default function StatisticsTab({ seasonRecords }) {
       })
       .finally(() => {
         if (!cancelled) setLoadingGames(false)
+      })
+    integrationsApi
+      .fetchRankings()
+      .then((resp) => {
+        if (!cancelled) setRankings(resp.rankings || [])
+      })
+      .catch((err) => {
+        if (!cancelled) setRankingsError(err.message || 'Failed to load rankings')
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingRankings(false)
       })
     return () => {
       cancelled = true
@@ -200,6 +214,26 @@ export default function StatisticsTab({ seasonRecords }) {
     </Card>
   )
 
+  const RankBar = ({ rank, size, pct }) => {
+    const safeSize = Number(size) || 0
+    const safeRank = Number(rank) || 0
+    const width = safeSize ? Math.max(4, Math.round(((safeSize - safeRank + 1) / safeSize) * 100)) : 0
+    return (
+      <div className="min-w-[120px]">
+        <div className="flex items-center justify-between text-xs">
+          <span className="font-medium text-slate-700">
+            {safeRank ? `#${safeRank}` : '—'}
+            {safeSize ? ` / ${safeSize}` : ''}
+          </span>
+          <span className="text-slate-400">{pct ? `${pct}%` : ''}</span>
+        </div>
+        <div className="mt-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+          <div className="h-full bg-indigo-500 rounded-full" style={{ width: `${width}%` }} />
+        </div>
+      </div>
+    )
+  }
+
   if (loadingGames) {
     return (
       <div className="flex items-center justify-center py-16 text-slate-500">
@@ -259,6 +293,61 @@ export default function StatisticsTab({ seasonRecords }) {
           </CardContent>
         </Card>
       )}
+
+      {/* Team / league rankings */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Team & League Rankings</CardTitle>
+          <CardDescription>Where you rank by points among teammates and the league each season</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {loadingRankings ? (
+            <div className="flex items-center justify-center py-6 text-slate-500">
+              <Loader2 className="w-4 h-4 animate-spin mr-2" /> Loading rankings...
+            </div>
+          ) : rankingsError ? (
+            <p className="text-sm text-red-700 py-4">{rankingsError}</p>
+          ) : rankings.length === 0 ? (
+            <p className="text-sm text-slate-500 text-center py-6">No ranking data yet.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-slate-500 border-b border-slate-200">
+                    <th className="text-left py-2">Season</th>
+                    <th className="text-left">League</th>
+                    <th className="text-left">Team</th>
+                    <th className="text-right">GP</th>
+                    <th className="text-right">PTS</th>
+                    <th className="text-left">Team Rank</th>
+                    <th className="text-left">League Rank</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rankings.map((r, i) => (
+                    <tr key={i} className="border-b border-slate-100 align-top">
+                      <td className="py-2 whitespace-nowrap font-medium">{r.season}</td>
+                      <td className="py-2">{SOURCE_LABELS[r.source] || r.source}</td>
+                      <td className="py-2">{r.team || '—'}</td>
+                      <td className="py-2 text-right">{r.games ?? '—'}</td>
+                      <td className="py-2 text-right font-medium">{r.points ?? '—'}</td>
+                      <td className="py-2">
+                        <RankBar rank={r.teamRank} size={r.teamSize} pct={r.teamPercentile} />
+                      </td>
+                      <td className="py-2">
+                        <RankBar rank={r.leagueRank} size={r.leagueSize} pct={r.leaguePercentile} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="text-[11px] text-slate-400 mt-2">
+                Percentile = % of players you outrank (higher is better). Ties share the same rank.
+              </p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Per-season game chart */}
       <Card>

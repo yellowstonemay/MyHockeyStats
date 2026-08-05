@@ -80,9 +80,10 @@ echo ""
 
 # ─── Step 4: NJ.com HS hockey (roster refresh + career/games) ─────────────
 echo "─────────────────────────────────────────────────────────────────────────"
-echo "  [4/4] NJ.com high school hockey (roster refresh + career/games)"
+echo "  [4/4] NJ.com high school hockey (roster refresh + career/games + rankings)"
 echo "─────────────────────────────────────────────────────────────────────────"
 $PYTHON njhs_deep.py --roster $DRY 2>&1 | tee -a "$LOG_DIR/deep-dive.log"
+$PYTHON njhs_deep.py --stats $DRY 2>&1 | tee -a "$LOG_DIR/deep-dive.log"
 $PYTHON njhs_deep.py $DRY 2>&1 | tee -a "$LOG_DIR/deep-dive.log"
 echo ""
 

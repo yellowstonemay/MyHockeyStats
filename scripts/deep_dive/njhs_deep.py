@@ -7,6 +7,7 @@ BeautifulSoup is sufficient (no browser needed).
 
 Modes:
     python njhs_deep.py --roster            # all conferences -> teams -> rosters -> njhs_rosters
+    python njhs_deep.py --stats             # all teams -> per-player season stats -> njhs_player_stats (rankings)
     python njhs_deep.py                     # all NJHS-linked users: career + game log (latest season)
     python njhs_deep.py --player-slug ethan-yan
     python njhs_deep.py --all-seasons       # career + game log for every season in the career table
@@ -138,6 +139,30 @@ CREATE TABLE IF NOT EXISTS njhs_change_event (
     detected_at      TIMESTAMP NOT NULL DEFAULT NOW(),
     event_type       VARCHAR(32) DEFAULT 'STAT_CHANGE'
 );
+CREATE TABLE IF NOT EXISTS njhs_player_stats (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    season_year  INTEGER NOT NULL,
+    season_label VARCHAR(32) NOT NULL,
+    school_slug  VARCHAR(255),
+    team_name    VARCHAR(255),
+    conference   VARCHAR(64),
+    player_id    VARCHAR(255) NOT NULL,
+    player_name  VARCHAR(255),
+    jersey       VARCHAR(16),
+    position     VARCHAR(16),
+    player_class VARCHAR(32),
+    goals        INTEGER,
+    assists      INTEGER,
+    points       INTEGER,
+    gwg          INTEGER,
+    evg          INTEGER,
+    ppg          INTEGER,
+    shg          INTEGER,
+    otg          INTEGER,
+    created_at   TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at   TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE (season_year, player_id)
+);
 """
 
 
@@ -232,6 +257,117 @@ def scrape_rosters(conn, season_year: int, dry_run: bool = False) -> int:
         if not dry_run:
             conn.commit()
         print(f"  [{conf}] {len(seen)} team(s)")
+    return total
+
+
+# ---------------------------------------------------------------------------
+# Team stats scrape: per-player season totals for EVERY team (for rankings)
+# ---------------------------------------------------------------------------
+
+def parse_team_stats_table(soup: BeautifulSoup) -> list[dict]:
+    """Skaters table: player (name #jersey • class • pos) | G | A | P | GWG | EVG | PPG | SHG | OTG."""
+    out: list[dict] = []
+    for t in soup.find_all("table"):
+        heads = [th.get_text(" ", strip=True) for th in t.find_all("th")]
+        if "G" not in heads or "P" not in heads:
+            continue
+        for tr in t.find_all("tr"):
+            cells = [td.get_text(" ", strip=True) for td in tr.find_all("td")]
+            if len(cells) < 4:
+                continue
+            a = tr.find("a", href=True)
+            if not a:
+                continue
+            m = re.search(rf"/player/([^/]+)/{SPORT}", a["href"])
+            if not m:
+                continue
+            slug = m.group(1)
+            name = a.get_text(" ", strip=True) or ""
+            # header cell like "Lex Assante #11 • Senior • D"
+            header = cells[0]
+            jersey, pclass, pos = None, None, None
+            hm = re.search(r"#(\d+)", header)
+            if hm:
+                jersey = hm.group(1)
+            pm = re.search(r"•\s*(\w+)\s*•\s*([FGD])\s*$", header)
+            if pm:
+                pclass, pos = pm.group(1), pm.group(2)
+            out.append({
+                "player_id": slug,
+                "player_name": name,
+                "jersey": jersey,
+                "player_class": pclass,
+                "position": pos,
+                "goals": _to_int(cells[1]) if len(cells) > 1 else None,
+                "assists": _to_int(cells[2]) if len(cells) > 2 else None,
+                "points": _to_int(cells[3]) if len(cells) > 3 else None,
+                "gwg": _to_int(cells[4]) if len(cells) > 4 else None,
+                "evg": _to_int(cells[5]) if len(cells) > 5 else None,
+                "ppg": _to_int(cells[6]) if len(cells) > 6 else None,
+                "shg": _to_int(cells[7]) if len(cells) > 7 else None,
+                "otg": _to_int(cells[8]) if len(cells) > 8 else None,
+            })
+    return out
+
+
+def scrape_team_stats(conn, season_year: int, dry_run: bool = False) -> int:
+    """Scrape per-player season stats for every team (from njhs_rosters) into
+    njhs_player_stats — the full league universe needed for rankings."""
+    label = season_label(season_year)
+    with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+        cur.execute(
+            "SELECT DISTINCT school_slug, team_name, conference FROM njhs_rosters "
+            "WHERE season_year = %s ORDER BY team_name", (season_year,))
+        teams = [dict(r) for r in cur.fetchall()]
+    total = 0
+    for t in teams:
+        school_slug = t["school_slug"]
+        if not school_slug:
+            continue
+        try:
+            soup = fetch_soup(f"{BASE}/school/{school_slug}/{SPORT}/season/{label}/stats")
+        except Exception as e:
+            print(f"  [WARN] stats {school_slug}: {e}")
+            continue
+        rows = parse_team_stats_table(soup)
+        if dry_run:
+            print(f"  {t['team_name']}: {len(rows)} skaters")
+            total += len(rows)
+            continue
+        with conn.cursor() as cur:
+            for r in rows:
+                cur.execute(
+                    """INSERT INTO njhs_player_stats
+                       (id, season_year, season_label, school_slug, team_name, conference,
+                        player_id, player_name, jersey, position, player_class,
+                        goals, assists, points, gwg, evg, ppg, shg, otg)
+                       VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                               %s, %s, %s, %s, %s, %s, %s, %s)
+                       ON CONFLICT (season_year, player_id) DO UPDATE SET
+                         school_slug = EXCLUDED.school_slug,
+                         team_name = EXCLUDED.team_name,
+                         conference = EXCLUDED.conference,
+                         player_name = EXCLUDED.player_name,
+                         jersey = EXCLUDED.jersey,
+                         position = EXCLUDED.position,
+                         player_class = EXCLUDED.player_class,
+                         goals = EXCLUDED.goals,
+                         assists = EXCLUDED.assists,
+                         points = EXCLUDED.points,
+                         gwg = EXCLUDED.gwg,
+                         evg = EXCLUDED.evg,
+                         ppg = EXCLUDED.ppg,
+                         shg = EXCLUDED.shg,
+                         otg = EXCLUDED.otg,
+                         updated_at = NOW()""",
+                    (season_year, label, school_slug, t["team_name"], t["conference"],
+                     r["player_id"], r["player_name"], r["jersey"], r["position"],
+                     r["player_class"], r["goals"], r["assists"], r["points"],
+                     r["gwg"], r["evg"], r["ppg"], r["shg"], r["otg"]),
+                )
+        conn.commit()
+        print(f"  {t['team_name']}: {len(rows)} skaters")
+        total += len(rows)
     return total
 
 
@@ -467,6 +603,7 @@ def load_linked(conn) -> list[str]:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--roster", action="store_true", help="scrape all rosters into njhs_rosters")
+    ap.add_argument("--stats", action="store_true", help="scrape all team stats into njhs_player_stats (for rankings)")
     ap.add_argument("--player-slug", help="scrape a single player slug")
     ap.add_argument("--season", type=int, help="season start year (default: latest)")
     ap.add_argument("--all-seasons", action="store_true")
@@ -482,6 +619,10 @@ def main() -> None:
         if args.roster:
             total = scrape_rosters(conn, season_year, dry_run=args.dry_run)
             print(f"Roster scrape done: {total} player rows")
+            return
+        if args.stats:
+            total = scrape_team_stats(conn, season_year, dry_run=args.dry_run)
+            print(f"Team stats scrape done: {total} player rows")
             return
         if args.player_slug:
             scrape_player(conn, args.player_slug, season_year,

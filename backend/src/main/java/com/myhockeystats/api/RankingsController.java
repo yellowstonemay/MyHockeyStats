@@ -1,0 +1,161 @@
+package com.myhockeystats.api;
+
+import com.myhockeystats.model.User;
+import com.myhockeystats.repository.UserRepository;
+import com.myhockeystats.security.JwtUtil;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+
+/**
+ * Team / league rankings for the signed-in player, computed from the full
+ * per-player season tables (AYHL career, THF/AHF rosters, NJ HS team stats).
+ */
+@RestController
+@RequestMapping("/api/rankings")
+public class RankingsController {
+
+    @Autowired
+    private JwtUtil jwtUtil;
+
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    private Optional<User> resolveUser(String authHeader) {
+        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+            return Optional.empty();
+        }
+        String email = jwtUtil.extractEmail(authHeader.substring("Bearer ".length()));
+        return userRepository.findByEmail(email);
+    }
+
+    /** GET /api/rankings — team + league rank per season for every identity link. */
+    @GetMapping
+    public ResponseEntity<?> rankings(
+            @RequestHeader(value = "Authorization", required = false) String authHeader) {
+        Optional<User> user = resolveUser(authHeader);
+        if (user.isEmpty()) {
+            return ResponseEntity.status(401).body(Map.of("error", "Authentication required"));
+        }
+        List<Map<String, Object>> links = jdbcTemplate.queryForList(
+            "SELECT source, source_player_id FROM player_identity_map " +
+            "WHERE user_id = ? AND link_state = 'CONFIRMED'", user.get().getId());
+
+        List<Map<String, Object>> all = new ArrayList<>();
+        for (Map<String, Object> link : links) {
+            String source = (String) link.get("source");
+            String playerId = (String) link.get("source_player_id");
+            if (source == null || playerId == null) continue;
+            all.addAll(computeRankings(source, playerId));
+        }
+        return ResponseEntity.ok(Map.of("rankings", all));
+    }
+
+    private List<Map<String, Object>> computeRankings(String source, String playerId) {
+        String sql = switch (source) {
+            case "AYHL" -> """
+                WITH r AS (
+                  SELECT source_player_id AS player_id, season_label AS season, team_name AS team,
+                         games_played AS games, goals, assists, points,
+                         RANK() OVER (PARTITION BY team_name, season_label ORDER BY points DESC, goals DESC, assists DESC) AS team_rank,
+                         COUNT(*) OVER (PARTITION BY team_name, season_label) AS team_size,
+                         RANK() OVER (PARTITION BY season_label ORDER BY points DESC, goals DESC, assists DESC) AS league_rank,
+                         COUNT(*) OVER (PARTITION BY season_label) AS league_size
+                  FROM ayhl_player_career
+                )
+                SELECT * FROM r WHERE player_id = ? ORDER BY season DESC""";
+            case "THF" -> """
+                WITH r AS (
+                  SELECT player_id, season_year::text AS season, team_name AS team,
+                         gp AS games, goals, assists, points,
+                         RANK() OVER (PARTITION BY team_name, season_year ORDER BY points DESC, goals DESC, assists DESC) AS team_rank,
+                         COUNT(*) OVER (PARTITION BY team_name, season_year) AS team_size,
+                         RANK() OVER (PARTITION BY season_year ORDER BY points DESC, goals DESC, assists DESC) AS league_rank,
+                         COUNT(*) OVER (PARTITION BY season_year) AS league_size
+                  FROM thf_rosters
+                )
+                SELECT * FROM r WHERE player_id = ? ORDER BY season DESC""";
+            case "AHF" -> """
+                WITH r AS (
+                  SELECT player_id, season_year::text AS season, team_name AS team,
+                         gp AS games, goals, assists, points,
+                         RANK() OVER (PARTITION BY team_name, season_year ORDER BY points DESC, goals DESC, assists DESC) AS team_rank,
+                         COUNT(*) OVER (PARTITION BY team_name, season_year) AS team_size,
+                         RANK() OVER (PARTITION BY season_year ORDER BY points DESC, goals DESC, assists DESC) AS league_rank,
+                         COUNT(*) OVER (PARTITION BY season_year) AS league_size
+                  FROM ahf_rosters
+                )
+                SELECT * FROM r WHERE player_id = ? ORDER BY season DESC""";
+            case "NJHS" -> """
+                WITH r AS (
+                  SELECT s.player_id, s.season_year::text AS season, s.team_name AS team,
+                         c.games_played AS games, s.goals, s.assists, s.points,
+                         RANK() OVER (PARTITION BY s.team_name, s.season_year ORDER BY s.points DESC, s.goals DESC, s.assists DESC) AS team_rank,
+                         COUNT(*) OVER (PARTITION BY s.team_name, s.season_year) AS team_size,
+                         RANK() OVER (PARTITION BY s.season_year ORDER BY s.points DESC, s.goals DESC, s.assists DESC) AS league_rank,
+                         COUNT(*) OVER (PARTITION BY s.season_year) AS league_size
+                  FROM njhs_player_stats s
+                  LEFT JOIN njhs_player_career c ON c.source_player_id = s.player_id AND c.season_year = s.season_year
+                )
+                SELECT * FROM r WHERE player_id = ? ORDER BY season DESC""";
+            default -> null;
+        };
+        if (sql == null) {
+            return List.of();
+        }
+
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, playerId);
+        // Dedupe per (season) keeping the best (max points) row (e.g. roster tables
+        // can carry more than one row per player+season).
+        Map<String, Map<String, Object>> best = new LinkedHashMap<>();
+        for (Map<String, Object> row : rows) {
+            String season = String.valueOf(row.get("season"));
+            Map<String, Object> existing = best.get(season);
+            if (existing == null || num(row.get("points")) > num(existing.get("points"))) {
+                best.put(season, row);
+            }
+        }
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (Map<String, Object> row : best.values()) {
+            int leagueRank = row.get("league_rank") == null ? 0 : ((Number) row.get("league_rank")).intValue();
+            int leagueSize = row.get("league_size") == null ? 0 : ((Number) row.get("league_size")).intValue();
+            int teamRank = row.get("team_rank") == null ? 0 : ((Number) row.get("team_rank")).intValue();
+            int teamSize = row.get("team_size") == null ? 0 : ((Number) row.get("team_size")).intValue();
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("source", source);
+            item.put("season", row.get("season"));
+            item.put("team", row.get("team"));
+            item.put("games", row.get("games"));
+            item.put("goals", row.get("goals"));
+            item.put("assists", row.get("assists"));
+            item.put("points", row.get("points"));
+            item.put("teamRank", teamRank);
+            item.put("teamSize", teamSize);
+            item.put("teamPercentile", pct(teamRank, teamSize));
+            item.put("leagueRank", leagueRank);
+            item.put("leagueSize", leagueSize);
+            item.put("leaguePercentile", pct(leagueRank, leagueSize));
+            out.add(item);
+        }
+        return out;
+    }
+
+    private static int num(Object v) {
+        return v == null ? 0 : ((Number) v).intValue();
+    }
+
+    private static double pct(int rank, int size) {
+        if (size <= 0) return 0;
+        return Math.round((1.0 - (double) rank / size) * 1000.0) / 10.0;
+    }
+}

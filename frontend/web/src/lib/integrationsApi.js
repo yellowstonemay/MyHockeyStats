@@ -83,6 +83,11 @@ export const integrationsApi = {
     })
   },
 
+  // Team / league rankings per season for the current player
+  fetchRankings() {
+    return api.fetchWithAuth('/rankings')
+  },
+
   fetchMyGameHistory(seasonYear) {
     const query = seasonYear ? `?seasonYear=${encodeURIComponent(seasonYear)}` : ''
     return api.fetchWithAuth(`/players/me/game-history${query}`)
