@@ -185,7 +185,8 @@ public class FollowController {
         String source = body.get("source");
         String spid = body.get("sourcePlayerId");
         String pname = body.get("playerName");
-        if (source == null || spid == null || spid.isBlank() || !ROSTER.containsKey(source)) {
+        boolean isEp = "EP".equalsIgnoreCase(source);
+        if (source == null || spid == null || spid.isBlank() || (!isEp && !ROSTER.containsKey(source))) {
             return ResponseEntity.badRequest().body(Map.of("error", "source and sourcePlayerId are required"));
         }
         long uid = user.get().getId();
@@ -195,13 +196,36 @@ public class FollowController {
             return ResponseEntity.badRequest().body(Map.of("error", "You can follow up to " + MAX_FOLLOWS + " players"));
         }
 
-        // Validate the player actually exists in the source roster.
-        String[] meta = ROSTER.get(source);
-        List<Integer> exists = jdbcTemplate.query(
-            "SELECT 1 FROM " + meta[0] + " WHERE player_id = ? LIMIT 1",
-            (rs, rn) -> rs.getInt(1), spid);
-        if (exists.isEmpty()) {
-            return ResponseEntity.badRequest().body(Map.of("error", "Player not found in " + source));
+        if (isEp) {
+            // EP follow: the player comes from our EP quicksearch results. If we
+            // don't have their career history yet, enqueue a CAREER fetch for the
+            // ep_lookup poller.
+            List<Integer> have = jdbcTemplate.query(
+                "SELECT 1 FROM ep_player_career WHERE ep_player_id = ? LIMIT 1",
+                (rs, rn) -> rs.getInt(1), spid);
+            if (have.isEmpty()) {
+                List<String> pending = jdbcTemplate.query(
+                    "SELECT id::text FROM ep_lookup_requests " +
+                    "WHERE type = 'CAREER' AND ep_player_id = ? AND status IN ('PENDING','RUNNING') " +
+                    "ORDER BY created_at DESC LIMIT 1",
+                    (rs, rn) -> rs.getString(1), spid);
+                if (pending.isEmpty()) {
+                    String ename = (pname == null || pname.isBlank()) ? spid : pname.trim();
+                    jdbcTemplate.update(
+                        "INSERT INTO ep_lookup_requests (id, user_id, type, name, ep_player_id, status, created_at) " +
+                        "VALUES (gen_random_uuid(), ?, 'CAREER', ?, ?, 'PENDING', NOW())",
+                        uid, ename, spid);
+                }
+            }
+        } else {
+            // Validate the player actually exists in the source roster.
+            String[] meta = ROSTER.get(source);
+            List<Integer> exists = jdbcTemplate.query(
+                "SELECT 1 FROM " + meta[0] + " WHERE player_id = ? LIMIT 1",
+                (rs, rn) -> rs.getInt(1), spid);
+            if (exists.isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Player not found in " + source));
+            }
         }
 
         String name = (pname == null || pname.isBlank()) ? spid : pname.trim();
@@ -337,6 +361,12 @@ public class FollowController {
         String source = (String) f.get("source");
         String spid = (String) f.get("sourcePlayerId");
 
+        // EP follows: career history from ep_player_career (no game-level data).
+        if (source.equals("EP")) {
+            enrichEp(f);
+            return;
+        }
+
         // Latest season from the career table.
         String[] cmeta = CAREER.get(source);
         String careerTable = cmeta[0];
@@ -415,6 +445,64 @@ public class FollowController {
         } catch (Exception e) {
             f.put("recentGames", List.of());
         }
+    }
+
+    /** Enrich an EP follow: profile link + latest season + full career history. */
+    private void enrichEp(Map<String, Object> f) {
+        String epId = (String) f.get("sourcePlayerId");
+        f.put("profileUrl", "https://www.eliteprospects.com/player/" + epId);
+        f.put("recentGames", List.of());
+
+        // Primary (latest) season: latest season, most-games team.
+        try {
+            List<Map<String, Object>> season = jdbcTemplate.query(
+                "SELECT season_label, team_name, league, games_played, goals, assists, points, pim " +
+                "FROM ep_player_career WHERE ep_player_id = ? " +
+                "ORDER BY season_label DESC, games_played DESC NULLS LAST LIMIT 1",
+                (rs, rn) -> {
+                    Map<String, Object> m = new HashMap<>();
+                    m.put("season", rs.getString("season_label"));
+                    m.put("team", rs.getString("team_name"));
+                    m.put("league", rs.getString("league"));
+                    m.put("games", epInt(rs, "games_played"));
+                    m.put("goals", epInt(rs, "goals"));
+                    m.put("assists", epInt(rs, "assists"));
+                    m.put("points", epInt(rs, "points"));
+                    m.put("pim", epInt(rs, "pim"));
+                    return m;
+                }, epId);
+            if (!season.isEmpty()) f.put("season", season.get(0));
+        } catch (Exception e) {
+            // no career row yet
+        }
+
+        // Full career history for the card.
+        try {
+            List<Map<String, Object>> career = jdbcTemplate.query(
+                "SELECT season_label, team_name, league, games_played, goals, assists, points, pim " +
+                "FROM ep_player_career WHERE ep_player_id = ? " +
+                "ORDER BY season_label, team_name",
+                (rs, rn) -> {
+                    Map<String, Object> m = new HashMap<>();
+                    m.put("season", rs.getString("season_label"));
+                    m.put("team", rs.getString("team_name"));
+                    m.put("league", rs.getString("league"));
+                    m.put("games", epInt(rs, "games_played"));
+                    m.put("goals", epInt(rs, "goals"));
+                    m.put("assists", epInt(rs, "assists"));
+                    m.put("points", epInt(rs, "points"));
+                    m.put("pim", epInt(rs, "pim"));
+                    return m;
+                }, epId);
+            f.put("career", career);
+        } catch (Exception e) {
+            f.put("career", List.of());
+        }
+    }
+
+    private static Integer epInt(java.sql.ResultSet rs, String col) throws java.sql.SQLException {
+        Object v = rs.getObject(col);
+        return v == null ? null : ((Number) v).intValue();
     }
 
     /** Latest roster row for a player (team + season) — used when no career stats exist. */

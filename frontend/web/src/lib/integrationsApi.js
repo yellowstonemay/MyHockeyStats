@@ -148,6 +148,31 @@ export const integrationsApi = {
     return api.fetchWithAuth(`/follows/activity${qs}`)
   },
 
+  // ── Elite Prospects (EP) on-tap lookup fallback ────────────────────────
+  createEpLookup(name) {
+    return api.fetchWithAuth('/ep/lookup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    })
+  },
+
+  getEpLookup(requestId) {
+    return api.fetchWithAuth(`/ep/lookup/${encodeURIComponent(requestId)}`)
+  },
+
+  enqueueEpCareer(epPlayerId, playerName) {
+    return api.fetchWithAuth('/ep/career', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ epPlayerId, playerName }),
+    })
+  },
+
+  getEpCareer(epPlayerId) {
+    return api.fetchWithAuth(`/ep/career/${encodeURIComponent(epPlayerId)}`)
+  },
+
   // ── Support / report to admin ───────────────────────────────────────────
   sendSupportMessage(data) {
     return api.fetchWithAuth('/support/messages', {
