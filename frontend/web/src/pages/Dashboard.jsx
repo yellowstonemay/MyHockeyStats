@@ -7,6 +7,7 @@ import SeasonsTab from '../components/PlayerProfile/SeasonsTab'
 import StatisticsTab from '../components/StatisticsTab'
 import MyLeagues from '../components/MyLeagues'
 import FollowingTab from '../components/FollowingTab'
+import ActivityFeed from '../components/ActivityFeed'
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState('overview')
@@ -203,6 +204,8 @@ export default function Dashboard() {
                     )}
                   </CardContent>
                 </Card>
+
+                <ActivityFeed />
 
                 <MyLeagues />
 

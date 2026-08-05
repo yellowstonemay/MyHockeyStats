@@ -141,4 +141,10 @@ export const integrationsApi = {
       method: 'DELETE',
     })
   },
+
+  // Merged recent-games feed (me + followed players) with freshness timestamp
+  fetchActivity(limit) {
+    const qs = limit ? `?limit=${limit}` : ''
+    return api.fetchWithAuth(`/follows/activity${qs}`)
+  },
 }

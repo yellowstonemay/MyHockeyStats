@@ -7,6 +7,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
 
+import java.sql.Timestamp;
 import java.util.*;
 
 /**
@@ -53,6 +54,9 @@ public class FollowController {
     private final JwtUtil jwtUtil;
     private final UserRepository userRepository;
     private final JdbcTemplate jdbcTemplate;
+
+    /** (source, player_id) -> display name + whether it's the signed-in user. */
+    private record PlayerMeta(String name, boolean isMe) {}
 
     public FollowController(JwtUtil jwtUtil, UserRepository userRepository, JdbcTemplate jdbcTemplate) {
         this.jwtUtil = jwtUtil;
@@ -226,6 +230,106 @@ public class FollowController {
             return ResponseEntity.status(404).body(Map.of("error", "Follow not found"));
         }
         return ResponseEntity.ok(Map.of("message", "Unfollowed"));
+    }
+
+    /**
+     * GET /api/follows/activity — merged recent games (mine + followed players),
+     * newest first, with a freshness timestamp (asOf = last scrape across the
+     * involved players' game tables).
+     */
+    @GetMapping("/activity")
+    public ResponseEntity<?> activity(@RequestParam(defaultValue = "30") int limit,
+                                      @RequestHeader(value = "Authorization", required = false) String authHeader) {
+        Optional<User> user = resolveUser(authHeader);
+        if (user.isEmpty()) {
+            return ResponseEntity.status(401).body(Map.of("error", "Authentication required"));
+        }
+        long uid = user.get().getId();
+
+        // Involved players per source: my confirmed identity links + follows.
+        Map<String, Map<String, PlayerMeta>> players = new HashMap<>();
+        List<Map<String, Object>> myLinks = jdbcTemplate.query(
+            "SELECT source, source_player_id FROM player_identity_map " +
+            "WHERE user_id = ? AND link_state = 'CONFIRMED'",
+            (rs, rn) -> {
+                Map<String, Object> m = new HashMap<>();
+                m.put("source", rs.getString("source"));
+                m.put("id", rs.getString("source_player_id"));
+                return m;
+            }, uid);
+        for (Map<String, Object> l : myLinks) {
+            players.computeIfAbsent((String) l.get("source"), k -> new HashMap<>())
+                   .put((String) l.get("id"), new PlayerMeta("You", true));
+        }
+        List<Map<String, Object>> follows = jdbcTemplate.query(
+            "SELECT source, source_player_id, player_name FROM follows WHERE user_id = ?",
+            (rs, rn) -> {
+                Map<String, Object> m = new HashMap<>();
+                m.put("source", rs.getString("source"));
+                m.put("id", rs.getString("source_player_id"));
+                m.put("name", rs.getString("player_name"));
+                return m;
+            }, uid);
+        for (Map<String, Object> f : follows) {
+            players.computeIfAbsent((String) f.get("source"), k -> new HashMap<>())
+                   .putIfAbsent((String) f.get("id"), new PlayerMeta((String) f.get("name"), false));
+        }
+
+        List<Map<String, Object>> entries = new ArrayList<>();
+        Timestamp asOf = null;
+        for (Map.Entry<String, Map<String, PlayerMeta>> srcEntry : players.entrySet()) {
+            String source = srcEntry.getKey();
+            String table = GAMES.get(source);
+            Map<String, PlayerMeta> byId = srcEntry.getValue();
+            if (table == null || byId.isEmpty()) continue;
+            List<String> ids = new ArrayList<>(byId.keySet());
+            String placeholders = String.join(",", Collections.nCopies(ids.size(), "?"));
+
+            String sql = "SELECT player_id, game_date, team_for, team_against, goals, assists, points, pim " +
+                         "FROM " + table + " WHERE player_id IN (" + placeholders + ") " +
+                         "AND game_date IS NOT NULL ORDER BY game_date DESC, game_id DESC LIMIT 30";
+            List<Map<String, Object>> rows = jdbcTemplate.query(sql,
+                (rs, rn) -> {
+                    String pid = rs.getString("player_id");
+                    PlayerMeta meta = byId.get(pid);
+                    Map<String, Object> m = new HashMap<>();
+                    m.put("source", source);
+                    m.put("playerName", meta == null ? pid : meta.name());
+                    m.put("isMe", meta != null && meta.isMe());
+                    m.put("date", rs.getDate("game_date") == null ? null : rs.getDate("game_date").toString());
+                    m.put("teamFor", rs.getString("team_for"));
+                    m.put("opponent", rs.getString("team_against"));
+                    m.put("goals", rs.getInt("goals"));
+                    m.put("assists", rs.getInt("assists"));
+                    m.put("points", rs.getInt("points"));
+                    m.put("pim", rs.getInt("pim"));
+                    return m;
+                }, ids.toArray());
+            entries.addAll(rows);
+
+            // Freshness: last scrape for these players in this source.
+            List<Timestamp> ts = jdbcTemplate.query(
+                "SELECT MAX(scraped_at) FROM " + table + " WHERE player_id IN (" + placeholders + ")",
+                (rs, rn) -> rs.getTimestamp(1), ids.toArray());
+            if (!ts.isEmpty() && ts.get(0) != null && (asOf == null || ts.get(0).after(asOf))) {
+                asOf = ts.get(0);
+            }
+        }
+
+        entries.sort((a, b) -> {
+            String da = (String) a.get("date");
+            String db = (String) b.get("date");
+            if (da == null && db == null) return 0;
+            if (da == null) return 1;
+            if (db == null) return -1;
+            return db.compareTo(da);
+        });
+        int cap = Math.max(0, Math.min(limit, entries.size()));
+
+        return ResponseEntity.ok(Map.of(
+            "entries", entries.subList(0, cap),
+            "asOf", asOf == null ? null : asOf.toInstant().toString()
+        ));
     }
 
     // ─── enrichment: latest season totals + last 5 games per source ──────────

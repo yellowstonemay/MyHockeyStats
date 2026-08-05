@@ -223,6 +223,40 @@ export default function StatisticsTab({ seasonRecords }) {
     return sortedGames.filter((g) => (g.points ?? 0) >= 2).length
   }, [sortedGames])
 
+  // ── Milestones & streaks ────────────────────────────────────────────────
+  const nextMilestone = (value, list) => {
+    const next = (list || []).find((m) => value < m)
+    return next ? { next, remaining: next - value } : null
+  }
+  const milestones = useMemo(() => ({
+    points: nextMilestone(career.points, [50, 100, 250, 500]),
+    goals: nextMilestone(career.goals, [50, 100, 250]),
+    assists: nextMilestone(career.assists, [50, 100, 250]),
+  }), [career])
+
+  const currentStreak = useMemo(() => {
+    let streak = 0
+    for (let i = sortedGames.length - 1; i >= 0; i--) {
+      if ((sortedGames[i].points ?? 0) > 0) streak += 1
+      else break
+    }
+    return streak
+  }, [sortedGames])
+
+  const gameHighlights = useMemo(() => {
+    let bestPoints = 0
+    let bestGoals = 0
+    let hatTricks = 0
+    sortedGames.forEach((g) => {
+      const p = g.points ?? 0
+      const gl = g.goals ?? 0
+      if (p > bestPoints) bestPoints = p
+      if (gl > bestGoals) bestGoals = gl
+      if (gl >= 3) hatTricks += 1
+    })
+    return { bestPoints, bestGoals, hatTricks }
+  }, [sortedGames])
+
   const ppgCareer = career.games ? Number((career.points / career.games).toFixed(2)) : 0
 
   const StatCard = ({ label, value, sub }) => (
@@ -288,6 +322,50 @@ export default function StatisticsTab({ seasonRecords }) {
         <StatCard label="PIM" value={career.pim} />
         <StatCard label="Points / Game" value={ppgCareer.toFixed(2)} />
       </div>
+
+      {/* Milestones & streaks */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Milestones & Streaks</CardTitle>
+          <CardDescription>Career milestones and hot streaks</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="border border-slate-200 rounded-lg p-3">
+              <div className="text-xs text-slate-500">Next milestone</div>
+              {milestones.points ? (
+                <div className="mt-1 text-sm">
+                  <b className="text-indigo-600">{milestones.points.remaining} pts</b>
+                  <span className="text-slate-600"> to {milestones.points.next}</span>
+                </div>
+              ) : (
+                <div className="mt-1 text-sm text-slate-400">—</div>
+              )}
+              {milestones.goals ? (
+                <div className="text-sm text-slate-600">{milestones.goals.remaining} goals to {milestones.goals.next}</div>
+              ) : null}
+              {milestones.assists ? (
+                <div className="text-sm text-slate-600">{milestones.assists.remaining} assists to {milestones.assists.next}</div>
+              ) : null}
+            </div>
+            <div className="border border-slate-200 rounded-lg p-3">
+              <div className="text-xs text-slate-500">Current point streak</div>
+              <div className="mt-1 text-2xl font-bold text-slate-900">{currentStreak}</div>
+              <div className="text-[11px] text-slate-400">best {streaks.longest}</div>
+            </div>
+            <div className="border border-slate-200 rounded-lg p-3">
+              <div className="text-xs text-slate-500">Best game</div>
+              <div className="mt-1 text-2xl font-bold text-slate-900">{gameHighlights.bestPoints} pts</div>
+              <div className="text-[11px] text-slate-400">{gameHighlights.bestGoals} goals</div>
+            </div>
+            <div className="border border-slate-200 rounded-lg p-3">
+              <div className="text-xs text-slate-500">Hat tricks</div>
+              <div className="mt-1 text-2xl font-bold text-slate-900">{gameHighlights.hatTricks}</div>
+              <div className="text-[11px] text-slate-400">{multiPointGames} multi-pt games</div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Season-over-season trend */}
       {seasonTrends.length > 0 && (
