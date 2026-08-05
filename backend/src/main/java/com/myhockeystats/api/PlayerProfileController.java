@@ -10,6 +10,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
 
+import java.sql.Timestamp;
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
@@ -24,6 +25,9 @@ import java.util.regex.Pattern;
 public class PlayerProfileController {
     private static final Pattern BIRTH_MONTH_YEAR_PATTERN = Pattern.compile("^(0[1-9]|1[0-2])/\\d{4}$");
     private static final DateTimeFormatter BIRTH_MONTH_YEAR_FORMATTER = DateTimeFormatter.ofPattern("MM/yyyy");
+
+    /** Min minutes a user must wait before triggering another full deep-dive (protects the source sites). */
+    private static final long DEEP_DIVE_COOLDOWN_MINUTES = 30;
 
     private final PlayerProfileService playerProfileService;
     private final JwtUtil jwtUtil;
@@ -109,6 +113,20 @@ public class PlayerProfileController {
             Integer.class, user.get().getId());
         if (!pending.isEmpty()) {
             return ResponseEntity.ok(Map.of("message", "Your stats are already being refreshed.", "queued", false));
+        }
+        // Cooldown: block chained refreshes so we don't hammer the source sites.
+        List<Timestamp> lastReq = jdbcTemplate.queryForList(
+            "SELECT requested_at FROM deep_dive_requests WHERE user_id = ? " +
+            "ORDER BY requested_at DESC LIMIT 1",
+            Timestamp.class, user.get().getId());
+        if (!lastReq.isEmpty()) {
+            long waited = (System.currentTimeMillis() - lastReq.get(0).getTime()) / 60000L;
+            if (waited < DEEP_DIVE_COOLDOWN_MINUTES) {
+                long wait = DEEP_DIVE_COOLDOWN_MINUTES - waited;
+                return ResponseEntity.ok(Map.of(
+                    "message", "Stats were just refreshed. You can refresh again in " + wait + " min.",
+                    "queued", false));
+            }
         }
         jdbcTemplate.update(
             "INSERT INTO deep_dive_requests (id, user_id, scope, status, requested_at) " +

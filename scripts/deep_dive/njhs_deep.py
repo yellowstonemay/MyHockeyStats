@@ -24,6 +24,7 @@ from uuid import uuid4
 import psycopg2
 import psycopg2.extras
 import requests
+import time
 from bs4 import BeautifulSoup
 
 import njhs_guard
@@ -59,9 +60,20 @@ def get_conn():
     )
 
 
+# Be polite to nj.com: keep at least this many seconds between page fetches so
+# bursts of requests don't trip bot protection (esp. during --roster/--stats).
+_FETCH_GAP_SECONDS = 1.0
+_LAST_FETCH_AT = 0.0
+
+
 def fetch_soup(url: str) -> BeautifulSoup:
+    global _LAST_FETCH_AT
+    gap = time.time() - _LAST_FETCH_AT
+    if gap < _FETCH_GAP_SECONDS:
+        time.sleep(_FETCH_GAP_SECONDS - gap)
     resp = requests.get(url, headers=HEADERS, timeout=30)
     resp.raise_for_status()
+    _LAST_FETCH_AT = time.time()
     return BeautifulSoup(resp.text, "html.parser")
 
 

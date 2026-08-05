@@ -13,6 +13,7 @@ AYHL scrape passes Cloudflare.
 """
 from __future__ import annotations
 
+import fcntl
 import os
 import subprocess
 import sys
@@ -22,6 +23,22 @@ import psycopg2
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _VENV_PY = os.path.join(SCRIPT_DIR, ".venv", "bin", "python")
 PYTHON = os.environ.get("PYTHON", _VENV_PY if os.path.exists(_VENV_PY) else sys.executable)
+
+# Single-instance lock: the poller cron fires every 5 min but an all-seasons
+# deep-dive can run longer. flock ensures only ONE poller scrapes at a time so
+# overlapping cron ticks don't hammer the source sites concurrently.
+_LOCK_FILE = os.path.join(SCRIPT_DIR, ".poller.lock")
+
+
+def acquire_lock() -> bool:
+    """Try to take the single-instance flock. False if another poller is running."""
+    try:
+        fd = open(_LOCK_FILE, "w")
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        acquire_lock.fd = fd  # keep a reference so the fd (and lock) stays alive
+        return True
+    except OSError:
+        return False
 
 
 def get_conn():
@@ -40,6 +57,9 @@ def run(cmd) -> int:
 
 
 def main() -> None:
+    if not acquire_lock():
+        print(f"[{datetime_now()}] Another deep-dive poller is already running; skipping this tick", flush=True)
+        return
     conn = get_conn()
     try:
         cur = conn.cursor()
