@@ -139,7 +139,7 @@ export default function Dashboard() {
           <div className="lg:col-span-1">
             <Card>
               <CardContent className="p-0">
-                <nav className="flex flex-col">
+                <nav className="flex flex-nowrap overflow-x-auto lg:flex-col">
                   {[
                     { id: 'overview', label: 'Overview', icon: '📊' },
                     { id: 'seasons', label: 'Seasons', icon: '🏒' },
@@ -151,7 +151,7 @@ export default function Dashboard() {
                     <button
                       key={item.id}
                       onClick={() => setActiveTab(item.id)}
-                      className={`flex items-center space-x-3 px-4 py-3 border-b border-slate-200 last:border-b-0 text-left transition-colors ${
+                      className={`flex items-center space-x-3 px-4 py-3 border-b border-slate-200 last:border-b-0 text-left transition-colors whitespace-nowrap shrink-0 ${
                         activeTab === item.id
                           ? 'bg-primary-50 text-primary-600 font-medium border-l-4 border-primary-600'
                           : 'text-slate-600 hover:bg-slate-50'

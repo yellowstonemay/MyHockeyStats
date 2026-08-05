@@ -42,7 +42,7 @@ export default function ActivityFeed() {
     setLoading(true)
     setError('')
     try {
-      const resp = await integrationsApi.fetchActivity()
+      const resp = await integrationsApi.fetchActivity(10)
       setEntries(resp.entries || [])
       setAsOf(resp.asOf || null)
     } catch (err) {
