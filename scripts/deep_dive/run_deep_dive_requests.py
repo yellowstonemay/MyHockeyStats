@@ -69,6 +69,9 @@ def main() -> None:
                     if source == "AYHL":
                         cmd = [PYTHON, os.path.join(SCRIPT_DIR, "ayhl_deep.py"),
                                "--player-id", str(spid), "--all-seasons"]
+                    elif source == "NJHS":
+                        cmd = [PYTHON, os.path.join(SCRIPT_DIR, "njhs_deep.py"),
+                               "--player-slug", str(spid), "--all-seasons"]
                     else:
                         cmd = [PYTHON, os.path.join(SCRIPT_DIR, "thf_ahf_deep.py"),
                                "--player-id", str(spid), "--all-seasons", "--source", source]

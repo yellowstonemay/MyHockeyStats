@@ -88,6 +88,32 @@ export const integrationsApi = {
     return api.fetchWithAuth('/rankings')
   },
 
+  // Current user's own player profile
+  fetchMyProfile() {
+    return api.fetchWithAuth('/players/me')
+  },
+
+  updateMyProfile(data) {
+    return api.fetchWithAuth('/players/me', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+  },
+
+  // Enqueue a deep-dive for the current user ("refresh my stats")
+  requestDeepDive() {
+    return api.fetchWithAuth('/players/me/deep-dive', {
+      method: 'POST',
+    })
+  },
+
+  // Full team roster for a season, ordered by the ranking criteria
+  fetchTeamRankings(source, season, teamId) {
+    const qs = `?source=${encodeURIComponent(source)}&season=${encodeURIComponent(season)}&teamId=${encodeURIComponent(teamId)}`
+    return api.fetchWithAuth(`/rankings/team${qs}`)
+  },
+
   fetchMyGameHistory(seasonYear) {
     const query = seasonYear ? `?seasonYear=${encodeURIComponent(seasonYear)}` : ''
     return api.fetchWithAuth(`/players/me/game-history${query}`)

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../lib/AuthContext'
+import { integrationsApi } from '../lib/integrationsApi'
 import { Button } from '../components/Button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/Card'
 import { Input } from '../components/Input'
@@ -24,18 +25,42 @@ export default function Profile() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
+  // Load the current user's existing profile on mount.
+  useEffect(() => {
+    let cancelled = false
+    integrationsApi
+      .fetchMyProfile()
+      .then((resp) => {
+        const p = resp.profile
+        if (cancelled || !p) return
+        setFullName(p.fullName || '')
+        setBirthMonthYear(p.birthMonthYear || '')
+        setLocation(p.location || '')
+        setPosition(p.position || '')
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   const handleSave = async (e) => {
     e.preventDefault()
     setError('')
     setLoading(true)
-    
+
     try {
-      if (!BIRTH_MONTH_YEAR_REGEX.test(birthMonthYear)) {
+      if (birthMonthYear && !BIRTH_MONTH_YEAR_REGEX.test(birthMonthYear)) {
         throw new Error('Birth month/year must be in MM/YYYY format (example: 05/2011)')
       }
-
-      // TODO: Once API is ready, send profile update
-      // const response = await api.updateProfile({ fullName, birthMonthYear, location, position })
+      const resp = await integrationsApi.updateMyProfile({ fullName, birthMonthYear, location, position })
+      const p = resp.profile
+      if (p) {
+        setFullName(p.fullName || '')
+        setBirthMonthYear(p.birthMonthYear || '')
+        setLocation(p.location || '')
+        setPosition(p.position || '')
+      }
       setSaved(true)
       setTimeout(() => setSaved(false), 3000)
     } catch (err) {

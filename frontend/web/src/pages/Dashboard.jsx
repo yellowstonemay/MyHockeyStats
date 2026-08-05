@@ -5,6 +5,7 @@ import { AlertCircle, Loader2, RefreshCw } from 'lucide-react'
 import { integrationsApi } from '../lib/integrationsApi'
 import SeasonsTab from '../components/PlayerProfile/SeasonsTab'
 import StatisticsTab from '../components/StatisticsTab'
+import MyLeagues from '../components/MyLeagues'
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState('overview')
@@ -200,6 +201,8 @@ export default function Dashboard() {
                     )}
                   </CardContent>
                 </Card>
+
+                <MyLeagues />
 
                 <Card>
                   <CardHeader>
