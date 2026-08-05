@@ -36,6 +36,27 @@ export default function StatisticsTab({ seasonRecords }) {
   const [rankings, setRankings] = useState([])
   const [loadingRankings, setLoadingRankings] = useState(true)
   const [rankingsError, setRankingsError] = useState('')
+  const [teamModal, setTeamModal] = useState(null)   // { source, season, teamId, team, playerId } | null
+  const [teamPlayers, setTeamPlayers] = useState([])
+  const [teamLoading, setTeamLoading] = useState(false)
+  const [teamError, setTeamError] = useState('')
+
+  const openTeam = async (row) => {
+    setTeamModal({ source: row.source, season: row.season, teamId: row.teamKey, team: row.team, playerId: row.playerId })
+    setTeamPlayers([])
+    setTeamError('')
+    setTeamLoading(true)
+    try {
+      const resp = await integrationsApi.fetchTeamRankings(row.source, row.season, row.teamKey)
+      setTeamPlayers(resp.players || [])
+    } catch (err) {
+      setTeamError(err.message || 'Failed to load team')
+    } finally {
+      setTeamLoading(false)
+    }
+  }
+
+  const closeTeam = () => setTeamModal(null)
 
   useEffect(() => {
     let cancelled = false
@@ -332,7 +353,13 @@ export default function StatisticsTab({ seasonRecords }) {
                       <td className="py-2 text-right">{r.games ?? '—'}</td>
                       <td className="py-2 text-right font-medium">{r.points ?? '—'}</td>
                       <td className="py-2">
-                        <RankBar rank={r.teamRank} size={r.teamSize} pct={r.teamPercentile} />
+                        <button
+                          onClick={() => openTeam(r)}
+                          className="block w-full text-left rounded hover:bg-indigo-50 p-0.5 -m-0.5 transition-colors"
+                          title="View team roster"
+                        >
+                          <RankBar rank={r.teamRank} size={r.teamSize} pct={r.teamPercentile} />
+                        </button>
                       </td>
                       <td className="py-2">
                         <RankBar rank={r.leagueRank} size={r.leagueSize} pct={r.leaguePercentile} />
@@ -484,6 +511,72 @@ export default function StatisticsTab({ seasonRecords }) {
             </div>
           </CardContent>
         </Card>
+      )}
+
+      {/* Team roster modal */}
+      {teamModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" onClick={closeTeam}>
+          <div
+            className="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[80vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900">{teamModal.team}</h3>
+                <p className="text-xs text-slate-500">
+                  {SOURCE_LABELS[teamModal.source] || teamModal.source} · {teamModal.season} — sorted by points
+                </p>
+              </div>
+              <button onClick={closeTeam} className="text-slate-400 hover:text-slate-600 text-xl leading-none" aria-label="Close">
+                ×
+              </button>
+            </div>
+            <div className="overflow-y-auto p-4">
+              {teamLoading ? (
+                <div className="flex items-center justify-center py-8 text-slate-500">
+                  <Loader2 className="w-4 h-4 animate-spin mr-2" /> Loading team...
+                </div>
+              ) : teamError ? (
+                <p className="text-sm text-red-700 py-4">{teamError}</p>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-slate-500 border-b border-slate-200">
+                      <th className="text-left py-1.5">#</th>
+                      <th className="text-left">Player</th>
+                      <th className="text-right">GP</th>
+                      <th className="text-right">G</th>
+                      <th className="text-right">A</th>
+                      <th className="text-right">PTS</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {teamPlayers.map((p) => {
+                      const isMe = String(p.player_id) === String(teamModal.playerId)
+                      return (
+                        <tr
+                          key={p.player_id}
+                          className={`border-b border-slate-100 ${isMe ? 'bg-indigo-50 font-semibold' : ''}`}
+                        >
+                          <td className={`py-1.5 pr-2 ${isMe ? 'text-indigo-700' : 'text-slate-500'}`}>{p.rank}</td>
+                          <td className="py-1.5">
+                            {p.name}
+                            {p.is_goalie ? <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-slate-200 text-slate-600">G</span> : null}
+                            {isMe ? <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-indigo-600 text-white">You</span> : null}
+                          </td>
+                          <td className="py-1.5 text-right">{p.games ?? '—'}</td>
+                          <td className="py-1.5 text-right">{p.goals ?? '—'}</td>
+                          <td className="py-1.5 text-right">{p.assists ?? '—'}</td>
+                          <td className="py-1.5 text-right font-medium">{p.points ?? '—'}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

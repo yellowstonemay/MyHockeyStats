@@ -64,7 +64,11 @@ public class RankingsController {
     private List<Map<String, Object>> computeRankings(String source, String playerId) {
         String sql = switch (source) {
             case "AYHL" -> """
-                WITH roster AS (
+                WITH goalies AS (
+                  SELECT DISTINCT player_id, season_label FROM ayhl_roster
+                  WHERE position IN ('G', 'Goalie')
+                ),
+                roster AS (
                   SELECT DISTINCT player_id, season_label, team_id, team_name FROM ayhl_roster
                 ),
                 team AS (
@@ -76,12 +80,16 @@ public class RankingsController {
                          COUNT(*) OVER (PARTITION BY COALESCE(r.team_id::text, c.team_name), c.season_label) AS team_size
                   FROM ayhl_player_career c
                   LEFT JOIN roster r ON r.player_id = c.source_player_id AND r.season_label = c.season_label
+                  LEFT JOIN goalies g ON g.player_id = c.source_player_id AND g.season_label = c.season_label
+                  WHERE g.player_id IS NULL
                 ),
                 league AS (
-                  SELECT source_player_id AS player_id, season_label AS season,
-                         RANK() OVER (PARTITION BY season_label ORDER BY points DESC, goals DESC, assists DESC) AS league_rank,
-                         COUNT(*) OVER (PARTITION BY season_label) AS league_size
-                  FROM ayhl_player_career
+                  SELECT c.source_player_id AS player_id, c.season_label AS season,
+                         RANK() OVER (PARTITION BY c.season_label ORDER BY c.points DESC, c.goals DESC, c.assists DESC) AS league_rank,
+                         COUNT(*) OVER (PARTITION BY c.season_label) AS league_size
+                  FROM ayhl_player_career c
+                  LEFT JOIN goalies g ON g.player_id = c.source_player_id AND g.season_label = c.season_label
+                  WHERE g.player_id IS NULL
                 )
                 SELECT t.player_id, t.season, t.team_key, t.team, t.games, t.goals, t.assists, t.points,
                        t.team_rank, t.team_size, l.league_rank, l.league_size
@@ -97,6 +105,7 @@ public class RankingsController {
                          RANK() OVER (PARTITION BY season_year ORDER BY points DESC, goals DESC, assists DESC) AS league_rank,
                          COUNT(*) OVER (PARTITION BY season_year) AS league_size
                   FROM thf_rosters
+                  WHERE position IS NULL OR position <> 'G'
                 )
                 SELECT * FROM r WHERE player_id = ? ORDER BY season DESC""";
             case "AHF" -> """
@@ -108,6 +117,7 @@ public class RankingsController {
                          RANK() OVER (PARTITION BY season_year ORDER BY points DESC, goals DESC, assists DESC) AS league_rank,
                          COUNT(*) OVER (PARTITION BY season_year) AS league_size
                   FROM ahf_rosters
+                  WHERE position IS NULL OR position <> 'G'
                 )
                 SELECT * FROM r WHERE player_id = ? ORDER BY season DESC""";
             case "NJHS" -> """
@@ -121,6 +131,7 @@ public class RankingsController {
                          COUNT(*) OVER (PARTITION BY s.season_year) AS league_size
                   FROM njhs_player_stats s
                   LEFT JOIN njhs_player_career c ON c.source_player_id = s.player_id AND c.season_year = s.season_year
+                  WHERE s.position IS NULL OR s.position <> 'G'
                 )
                 SELECT * FROM r WHERE player_id = ? ORDER BY season DESC""";
             default -> null;
@@ -150,6 +161,8 @@ public class RankingsController {
             item.put("source", source);
             item.put("season", row.get("season"));
             item.put("team", row.get("team"));
+            item.put("teamKey", row.get("team_key"));
+            item.put("playerId", row.get("player_id"));
             item.put("games", row.get("games"));
             item.put("goals", row.get("goals"));
             item.put("assists", row.get("assists"));
@@ -172,5 +185,77 @@ public class RankingsController {
     private static double pct(int rank, int size) {
         if (size <= 0) return 0;
         return Math.round((1.0 - (double) rank / size) * 1000.0) / 10.0;
+    }
+
+    /**
+     * GET /api/rankings/team?source=..&season=..&teamId=..
+     * Full team roster for a season, ordered by the ranking criteria
+     * (points DESC, goals DESC, assists DESC) so the player can see why they
+     * rank where they do. Authenticated only.
+     */
+    @GetMapping("/team")
+    public ResponseEntity<?> teamRoster(
+            @RequestParam String source,
+            @RequestParam String season,
+            @RequestParam String teamId,
+            @RequestHeader(value = "Authorization", required = false) String authHeader) {
+        Optional<User> user = resolveUser(authHeader);
+        if (user.isEmpty()) {
+            return ResponseEntity.status(401).body(Map.of("error", "Authentication required"));
+        }
+        String sql = switch (source) {
+            case "AYHL" -> """
+                SELECT c.source_player_id AS player_id, min(c.player_name) AS name,
+                       max(c.games_played) AS games, max(c.goals) AS goals,
+                       max(c.assists) AS assists, max(c.points) AS points,
+                       bool_or(r.position IN ('G', 'Goalie')) AS is_goalie
+                FROM ayhl_player_career c
+                JOIN ayhl_roster r ON r.player_id = c.source_player_id AND r.season_label = c.season_label
+                WHERE r.team_id::text = ? AND c.season_label = ?
+                GROUP BY c.source_player_id
+                ORDER BY bool_or(r.position IN ('G', 'Goalie')) ASC,
+                         max(c.points) DESC, max(c.goals) DESC, max(c.assists) DESC, c.source_player_id""";
+            case "THF" -> """
+                SELECT player_id, min(player_name) AS name, max(gp) AS games,
+                       max(goals) AS goals, max(assists) AS assists, max(points) AS points,
+                       bool_or(position = 'G') AS is_goalie
+                FROM thf_rosters
+                WHERE team_id::text = ? AND season_year::text = ?
+                GROUP BY player_id
+                ORDER BY bool_or(position = 'G') ASC,
+                         max(points) DESC, max(goals) DESC, max(assists) DESC, player_id""";
+            case "AHF" -> """
+                SELECT player_id, min(player_name) AS name, max(gp) AS games,
+                       max(goals) AS goals, max(assists) AS assists, max(points) AS points,
+                       bool_or(position = 'G') AS is_goalie
+                FROM ahf_rosters
+                WHERE team_id::text = ? AND season_year::text = ?
+                GROUP BY player_id
+                ORDER BY bool_or(position = 'G') ASC,
+                         max(points) DESC, max(goals) DESC, max(assists) DESC, player_id""";
+            case "NJHS" -> """
+                SELECT player_id, player_name AS name, NULL AS games, goals, assists, points,
+                       (position = 'G') AS is_goalie
+                FROM njhs_player_stats
+                WHERE team_name = ? AND season_year::text = ?
+                ORDER BY (position = 'G') ASC, points DESC, goals DESC, assists DESC, player_id""";
+            default -> null;
+        };
+        if (sql == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Invalid source"));
+        }
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, teamId, season);
+        for (int i = 0; i < rows.size(); i++) {
+            rows.get(i).put("rank", i + 1);
+            // Goalies don't have skater stats — blank them so the UI doesn't show
+            // misleading (and, for AYHL, corrupted) GP/G/A/PTS values.
+            if (Boolean.TRUE.equals(rows.get(i).get("is_goalie"))) {
+                rows.get(i).put("games", null);
+                rows.get(i).put("goals", null);
+                rows.get(i).put("assists", null);
+                rows.get(i).put("points", null);
+            }
+        }
+        return ResponseEntity.ok(Map.of("source", source, "season", season, "players", rows));
     }
 }
