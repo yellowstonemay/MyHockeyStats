@@ -249,12 +249,16 @@ public class AiInsightService {
     @SuppressWarnings("unchecked")
     private List<Map<String, Object>> parseInsights(String content) throws Exception {
         String trimmed = content == null ? "" : content.trim();
-        int start = trimmed.indexOf('{');
-        int end = trimmed.lastIndexOf('}');
-        if (start >= 0 && end > start) {
-            trimmed = trimmed.substring(start, end + 1);
+        // Strip markdown code fences if the model wrapped the JSON in ```json ... ```
+        if (trimmed.startsWith("```")) {
+            int firstNl = trimmed.indexOf('\n');
+            if (firstNl >= 0) trimmed = trimmed.substring(firstNl + 1);
+            int lastFence = trimmed.lastIndexOf("```");
+            if (lastFence >= 0) trimmed = trimmed.substring(0, lastFence);
+            trimmed = trimmed.trim();
         }
         JsonNode node = objectMapper.readTree(trimmed);
+        // Accept either a bare array [{...}] or an object {"insights":[{...}]}.
         JsonNode arr = node.isArray() ? node : node.path("insights");
         List<Map<String, Object>> out = new ArrayList<>();
         for (JsonNode n : arr) {
