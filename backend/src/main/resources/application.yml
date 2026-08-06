@@ -17,3 +17,16 @@ logging:
   level:
     root: INFO
     org.springframework.web: INFO
+
+app:
+  ai:
+    enabled: true
+    provider: deepseek
+    model: deepseek-v4-flash
+    base-url: https://api.deepseek.com
+    api-key: ${DEEPSEEK_API_KEY:}
+    daily-cap-usd: ${APP_AI_DAILY_CAP_USD:0.20}
+    weekly-per-user: ${APP_AI_WEEKLY_PER_USER:1}
+    max-output-tokens: 2000
+    price-input-per-m: 0.14        # USD per 1M input tokens (cache miss)
+    price-output-per-m: 0.28       # USD per 1M output tokens

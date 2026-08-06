@@ -8,6 +8,7 @@ import StatisticsTab from '../components/StatisticsTab'
 import MyLeagues from '../components/MyLeagues'
 import FollowingTab from '../components/FollowingTab'
 import ActivityFeed from '../components/ActivityFeed'
+import ReportTab from '../components/ReportTab'
 
 const DASH_TABS = [
   { id: 'overview', label: 'Overview', short: 'Home', icon: '📊' },
@@ -15,7 +16,7 @@ const DASH_TABS = [
   { id: 'games', label: 'Game History', short: 'Games', icon: '📝' },
   { id: 'stats', label: 'Statistics', short: 'Stats', icon: '📈' },
   { id: 'following', label: 'Following', short: 'Following', icon: '👥' },
-  { id: 'export', label: 'Export', short: 'Export', icon: '📄' },
+  { id: 'report', label: 'Report', short: 'Report', icon: '📄' },
 ]
 
 const SUPPORT_CATEGORIES = ['Incorrect data', 'Missing season', 'Wrong player link', 'Other']
@@ -233,7 +234,7 @@ export default function Dashboard() {
 
                 <ActivityFeed />
 
-                <MyLeagues />
+                <MyLeagues onViewReport={() => setActiveTab('report')} />
 
                 <Card>
                   <CardHeader>
@@ -446,25 +447,21 @@ export default function Dashboard() {
               <FollowingTab />
             )}
 
-            {activeTab === 'export' && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Export Your Stats</CardTitle>
-                  <CardDescription>Download your stats as PDFs to share</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-slate-600 mb-4">
-                    Export your game history and season summaries in PDF format.
-                  </p>
-                  <Button disabled>
-                    Export as PDF
-                  </Button>
-                </CardContent>
-              </Card>
+            {activeTab === 'report' && (
+              <ReportTab />
             )}
           </div>
         </div>
       </div>
+
+      {/* Print rules: only the report content prints (hide nav/buttons) */}
+      <style>{`
+        @media print {
+          body * { visibility: hidden; }
+          #report-print-area, #report-print-area * { visibility: visible; }
+          #report-print-area { position: absolute; left: 0; top: 0; width: 100%; }
+        }
+      `}</style>
 
       {/* Mobile bottom nav */}
       <nav className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-white border-t border-slate-200 pb-[env(safe-area-inset-bottom)]">

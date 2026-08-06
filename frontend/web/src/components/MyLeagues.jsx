@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { integrationsApi } from '../lib/integrationsApi'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './Card'
 import { Button } from './Button'
-import { Loader2, RefreshCw } from 'lucide-react'
+import { FileText, Loader2, RefreshCw } from 'lucide-react'
 
 const SOURCE_META = {
   AYHL: { label: 'AYHL', color: 'bg-indigo-100 text-indigo-700' },
@@ -16,7 +16,7 @@ function startYear(season) {
   return m ? Number(m[1]) : 0
 }
 
-export default function MyLeagues() {
+export default function MyLeagues({ onViewReport }) {
   const [rankings, setRankings] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -75,10 +75,17 @@ export default function MyLeagues() {
             Leagues you're linked to, with your latest team ranking (refreshed by the daily deep-dive)
           </CardDescription>
         </div>
-        <Button variant="outline" onClick={refresh} disabled={refreshing}>
-          {refreshing ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <RefreshCw className="w-4 h-4 mr-2" />}
-          Refresh my stats
-        </Button>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <Button variant="outline" onClick={refresh} disabled={refreshing}>
+            {refreshing ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <RefreshCw className="w-4 h-4 mr-2" />}
+            Refresh my stats
+          </Button>
+          {onViewReport && (
+            <Button onClick={onViewReport}>
+              <FileText className="w-4 h-4 mr-2" /> View your player report
+            </Button>
+          )}
+        </div>
       </CardHeader>
       <CardContent>
         {refreshMsg && (

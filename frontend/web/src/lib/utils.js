@@ -54,7 +54,16 @@ export const api = {
     }
     const res = await fetch(`${this.baseUrl}${url}`, { ...options, headers })
     if (!res.ok) {
-      throw new Error(`HTTP ${res.status}: ${res.statusText}`)
+      let msg = `HTTP ${res.status}: ${res.statusText}`
+      try {
+        const err = await res.json()
+        if (err && err.error) msg = err.error
+      } catch (e) {
+        /* non-JSON error body */
+      }
+      const error = new Error(msg)
+      error.status = res.status
+      throw error
     }
     return res.json()
   },

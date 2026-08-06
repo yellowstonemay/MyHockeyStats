@@ -30,6 +30,9 @@ services:
       SPRING_DATASOURCE_USERNAME: admin
       SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD:-your_secure_password}
       SPRING_FLYWAY_BASELINE_ON_MIGRATE: "true"
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      APP_AI_DAILY_CAP_USD: ${APP_AI_DAILY_CAP_USD:-0.20}
+      APP_AI_WEEKLY_PER_USER: ${APP_AI_WEEKLY_PER_USER:-1}
     ports:
       - "8080:8080"
     depends_on:

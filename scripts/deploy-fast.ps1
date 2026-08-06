@@ -94,7 +94,7 @@ if ($Files) {
     }
 } else {
     git -C $RepoRoot status --porcelain | ForEach-Object {
-        $line = $_.Trim()
+        $line = $_            # do NOT trim: porcelain uses columns (e.g. ' M path')
         if ($line.Length -lt 4) { return }
         $code = $line.Substring(0, 2)
         $path = $line.Substring(3).Trim()
