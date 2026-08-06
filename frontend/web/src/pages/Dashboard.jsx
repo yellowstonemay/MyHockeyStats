@@ -16,7 +16,7 @@ const DASH_TABS = [
   { id: 'games', label: 'Game History', short: 'Games', icon: '📝' },
   { id: 'stats', label: 'Statistics', short: 'Stats', icon: '📈' },
   { id: 'following', label: 'Following', short: 'Following', icon: '👥' },
-  { id: 'report', label: 'Report', short: 'Report', icon: '📄' },
+  { id: 'report', label: 'Report', short: 'Report', icon: '📄', ai: true },
 ]
 
 const SUPPORT_CATEGORIES = ['Incorrect data', 'Missing season', 'Wrong player link', 'Other']
@@ -186,6 +186,11 @@ export default function Dashboard() {
                     >
                       <span>{item.icon}</span>
                       <span>{item.label}</span>
+                      {item.ai && (
+                        <span className="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-gradient-to-r from-purple-500 to-fuchsia-500 text-white">
+                          ✨ AI
+                        </span>
+                      )}
                     </button>
                   ))}
                 </nav>
@@ -475,7 +480,12 @@ export default function Dashboard() {
               }`}
             >
               <span className="text-lg leading-none">{item.icon}</span>
-              <span>{item.short}</span>
+              <span className="flex items-center">
+                <span>{item.short}</span>
+                {item.ai && (
+                  <span className="ml-0.5 text-[7px] font-bold px-1 rounded bg-purple-100 text-purple-600">AI</span>
+                )}
+              </span>
             </button>
           ))}
         </div>

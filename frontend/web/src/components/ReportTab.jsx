@@ -87,6 +87,9 @@ export default function ReportTab() {
             <CardTitle className="flex items-center gap-2">
               <User className="w-5 h-5 text-slate-400" />
               {profile.fullName || 'Player Report'}
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700">
+                ✨ AI
+              </span>
             </CardTitle>
             <CardDescription className="mt-1">
               {[profile.age ? `${profile.age} yrs` : '', profile.position, profile.location]
