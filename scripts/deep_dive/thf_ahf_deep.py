@@ -291,7 +291,7 @@ def upsert_player_games(conn, source: str, player_id: str, player_name: str,
             max_year = cur.fetchone()[0]
         season_year = int(max_year) if max_year is not None else season_year
 
-    sql = f"SELECT game_id, season_year, game_date, home_team, away_team, league_name, scoresheet_json FROM {games_table}"
+    sql = f"SELECT game_id, season_year, game_date, home_team, away_team, league_name, scoresheet_json, scraped_at FROM {games_table}"
     params: list = []
     if season_year is not None:
         sql += " WHERE season_year = %s"
@@ -299,6 +299,29 @@ def upsert_player_games(conn, source: str, player_id: str, player_name: str,
     with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
         cur.execute(sql, params)
         game_rows = [dict(r) for r in cur.fetchall()]
+
+    # The source can list the SAME matchup twice (same date + teams) under two
+    # different game_ids (e.g. a corrected/re-recorded score — we've seen the
+    # same Rockets 10U game stored as both 13-1 and 10-1). Keying player-game
+    # rows on game_id then duplicates the game for the player. Dedupe by
+    # matchup, keeping the row with the latest scrape time (preferring the
+    # higher game_id on a tie) so only one row per physical game is processed.
+    def _matchup_key(row):
+        teams = sorted([
+            str(row.get("home_team") or "").strip().lower(),
+            str(row.get("away_team") or "").strip().lower(),
+        ])
+        return (row.get("game_date"), teams[0], teams[1])
+
+    by_matchup: dict = {}
+    for row in sorted(
+        game_rows,
+        key=lambda r: (r.get("scraped_at") or datetime.min, str(r.get("game_id") or "")),
+        reverse=True,
+    ):
+        key = _matchup_key(row)
+        by_matchup.setdefault(key, row)
+    game_rows = list(by_matchup.values())
 
     now = datetime.now()
     matched: list[dict] = []
