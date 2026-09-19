@@ -91,10 +91,15 @@ public class AiInsightService {
 
     /** Cached insights for a user+season, or null if none. */
     public List<Map<String, Object>> getCached(long userId, Integer season) {
+        return getCached(userId, season, null);
+    }
+
+    /** Cached insights for one player's season, or null if none. */
+    public List<Map<String, Object>> getCached(long userId, Integer season, Long playerId) {
         List<String> rows = jdbcTemplate.query(
             "SELECT insights_json FROM ai_insights WHERE user_id = ? AND season_year = ? " +
-            "ORDER BY created_at DESC LIMIT 1",
-            (rs, rn) -> rs.getString("insights_json"), userId, season);
+            "AND player_id IS NOT DISTINCT FROM ? ORDER BY created_at DESC LIMIT 1",
+            (rs, rn) -> rs.getString("insights_json"), userId, season, playerId);
         if (rows.isEmpty()) return null;
         try {
             return parseInsights(rows.get(0));
@@ -105,14 +110,24 @@ public class AiInsightService {
 
     /** Which season has cached insights (for the report to show them). */
     public Integer cachedSeason(long userId) {
+        return cachedSeason(userId, null);
+    }
+
+    public Integer cachedSeason(long userId, Long playerId) {
         List<Integer> rows = jdbcTemplate.query(
-            "SELECT season_year FROM ai_insights WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
-            (rs, rn) -> rs.getInt("season_year"), userId);
+            "SELECT season_year FROM ai_insights WHERE user_id = ? AND player_id IS NOT DISTINCT FROM ? " +
+            "ORDER BY created_at DESC LIMIT 1",
+            (rs, rn) -> rs.getInt("season_year"), userId, playerId);
         return rows.isEmpty() ? null : rows.get(0);
     }
 
     // ── generation ────────────────────────────────────────────────────────
     public Map<String, Object> generate(long userId, int season) {
+        return generate(userId, season, null);
+    }
+
+    /** Generate (and cache) the AI report for one player's season. */
+    public Map<String, Object> generate(long userId, int season, Long playerId) {
         if (!isConfigured()) {
             throw new NotConfiguredException();
         }
@@ -124,7 +139,7 @@ public class AiInsightService {
         }
 
         // Build the compact numeric payload (numbers only; no PII beyond first name).
-        Map<String, Object> payload = buildPayload(userId, season);
+        Map<String, Object> payload = buildPayload(userId, season, playerId);
         String promptJson = toJson(payload);
 
         String body = callDeepSeek(promptJson);
@@ -154,9 +169,9 @@ public class AiInsightService {
         cost = Math.round(cost * 1_000_000.0) / 1_000_000.0;
 
         jdbcTemplate.update(
-            "INSERT INTO ai_insights (id, user_id, season_year, source_json, insights_json, model, input_tokens, output_tokens, cost_usd, created_at) " +
-            "VALUES (gen_random_uuid(), ?, ?, ?, ?, ?, ?, ?, ?, NOW())",
-            userId, season, promptJson, toJson(insights), model, inTok, outTok, cost);
+            "INSERT INTO ai_insights (id, user_id, player_id, season_year, source_json, insights_json, model, input_tokens, output_tokens, cost_usd, created_at) " +
+            "VALUES (gen_random_uuid(), ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())",
+            userId, playerId, season, promptJson, toJson(insights), model, inTok, outTok, cost);
 
         jdbcTemplate.update(
             "INSERT INTO ai_usage_daily (day, calls, input_tokens, output_tokens, cost_usd) VALUES (CURRENT_DATE, 1, ?, ?, ?) " +
@@ -179,9 +194,9 @@ public class AiInsightService {
     }
 
     // ── payload / prompt ──────────────────────────────────────────────────
-    private Map<String, Object> buildPayload(long userId, int season) {
+    private Map<String, Object> buildPayload(long userId, int season, Long playerId) {
         Map<String, Object> p = new LinkedHashMap<>();
-        Map<String, Object> report = playerReportService.buildReport(userId);
+        Map<String, Object> report = playerReportService.buildReport(userId, playerId);
         Object profileObj = report.get("profile");
         Map<String, Object> profile = profileObj instanceof Map ? (Map<String, Object>) profileObj : Map.of();
         Map<String, Object> player = new LinkedHashMap<>();
@@ -191,14 +206,14 @@ public class AiInsightService {
         player.put("position", profile.get("position"));
         p.put("player", player);
 
-        Map<String, Object> summary = playerReportService.seasonSummary(userId, season);
+        Map<String, Object> summary = playerReportService.seasonSummary(userId, season, playerId);
         p.put("season", summary.get("season"));
         p.put("previousSeason", summary.get("previousSeason"));
         p.put("rankings", summary.get("rankings"));
 
         // Career totals.
         int g = 0, a = 0, pim = 0, gp = 0;
-        for (PlayerReportService.CareerRow r : playerReportService.careerRows(userId)) {
+        for (PlayerReportService.CareerRow r : playerReportService.careerRows(userId, playerId)) {
             gp += nz(r.games()); g += nz(r.goals()); a += nz(r.assists()); pim += nz(r.pim());
         }
         p.put("careerTotals", Map.of("games", gp, "goals", g, "assists", a, "points", g + a, "pim", pim));
