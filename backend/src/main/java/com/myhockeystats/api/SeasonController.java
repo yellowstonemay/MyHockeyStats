@@ -3,6 +3,8 @@ package com.myhockeystats.api;
 import com.myhockeystats.model.Game;
 import com.myhockeystats.model.Season;
 import com.myhockeystats.model.PlayerProfile;
+import com.myhockeystats.model.User;
+import com.myhockeystats.repository.UserRepository;
 import com.myhockeystats.service.GameService;
 import com.myhockeystats.service.SeasonService;
 import com.myhockeystats.service.PlayerProfileService;
@@ -22,13 +24,16 @@ public class SeasonController {
     private final GameService gameService;
     private final PlayerProfileService playerProfileService;
     private final JwtUtil jwtUtil;
+    private final UserRepository userRepository;
 
     public SeasonController(SeasonService seasonService, GameService gameService, 
-                           PlayerProfileService playerProfileService, JwtUtil jwtUtil) {
+                           PlayerProfileService playerProfileService, JwtUtil jwtUtil,
+                           UserRepository userRepository) {
         this.seasonService = seasonService;
         this.gameService = gameService;
         this.playerProfileService = playerProfileService;
         this.jwtUtil = jwtUtil;
+        this.userRepository = userRepository;
     }
 
     record SeasonResponse(Long id, Integer yearStart, Integer yearEnd, String teamName, String clubName, Integer totalGames) {}
@@ -45,16 +50,19 @@ public class SeasonController {
             }
             if (email == null) return ResponseEntity.status(401).body(Map.of("error", "Invalid or missing token"));
 
-            // Verify that the requested player profile belongs to the authenticated user
+            // Verify that the requested player profile is on the authenticated
+            // login's account. Players are shared, so membership is decided by
+            // the user_players link table (a co-parent is equally authorized).
             Optional<PlayerProfile> profile = playerProfileService.getProfileById(req.playerProfileId());
             if (profile.isEmpty()) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Player profile not found"));
             }
-            
-            // Verify ownership (optional security check)
-            PlayerProfile playerProfile = profile.get();
-            if (playerProfile.getUser() != null && !playerProfile.getUser().getEmail().equals(email)) {
-                return ResponseEntity.status(403).body(Map.of("error", "Not authorized to create season for this player"));
+
+            Optional<User> currentUser = userRepository.findByEmail(email);
+            if (currentUser.isEmpty()
+                    || !playerProfileService.isLinked(currentUser.get().getId(), req.playerProfileId())) {
+                return ResponseEntity.status(403)
+                    .body(Map.of("error", "Not authorized to create season for this player"));
             }
             
             Season season = seasonService.createSeason(req.playerProfileId(), req.yearStart(), req.yearEnd(), 

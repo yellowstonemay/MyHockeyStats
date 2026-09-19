@@ -16,7 +16,7 @@ function startYear(season) {
   return m ? Number(m[1]) : 0
 }
 
-export default function MyLeagues({ onViewReport }) {
+export default function MyLeagues({ onViewReport, playerId }) {
   const [rankings, setRankings] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -27,7 +27,7 @@ export default function MyLeagues({ onViewReport }) {
     setLoading(true)
     setError('')
     try {
-      const resp = await integrationsApi.fetchRankings()
+      const resp = await integrationsApi.fetchRankings(playerId)
       setRankings(resp.rankings || [])
     } catch (err) {
       setError(err.message || 'Failed to load your leagues')
@@ -39,7 +39,7 @@ export default function MyLeagues({ onViewReport }) {
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [playerId])
 
   // Latest season per source
   const leagues = useMemo(() => {
@@ -57,7 +57,11 @@ export default function MyLeagues({ onViewReport }) {
     setRefreshing(true)
     setRefreshMsg(null)
     try {
-      const resp = await integrationsApi.requestDeepDive()
+      // Scope the refresh to the player being viewed so we don't re-scrape the
+      // whole account just because one player's card was on screen.
+      const resp = playerId
+        ? await integrationsApi.requestPlayerDeepDive(playerId)
+        : await integrationsApi.requestDeepDive()
       setRefreshMsg({ kind: 'ok', text: resp.message || 'Your stats are being refreshed.' })
     } catch (err) {
       setRefreshMsg({ kind: 'err', text: err.message || 'Failed to start refresh' })

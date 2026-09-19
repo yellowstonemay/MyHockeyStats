@@ -19,7 +19,7 @@ const TONE_BADGE = {
 
 const TONE_LABEL = { positive: 'Positive', watch: 'Watch', neutral: 'Neutral' }
 
-export default function ReportTab() {
+export default function ReportTab({ playerId }) {
   const [report, setReport] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -30,7 +30,7 @@ export default function ReportTab() {
     setLoading(true)
     setError('')
     try {
-      const data = await reportApi.fetchMyReport()
+      const data = await reportApi.fetchMyReport(playerId)
       setReport(data)
     } catch (err) {
       setError(err.message || 'Failed to load report')
@@ -40,9 +40,10 @@ export default function ReportTab() {
   }
 
   useEffect(() => {
+    setReport(null)
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [playerId])
 
   const generate = async () => {
     const season = report?.latestSeason
@@ -50,7 +51,7 @@ export default function ReportTab() {
     setGenerating(true)
     setGenMsg(null)
     try {
-      await reportApi.generateInsights(season)
+      await reportApi.generateInsights(season, playerId)
       setGenMsg({ kind: 'ok', text: 'AI season report generated.' })
       await load()
     } catch (err) {

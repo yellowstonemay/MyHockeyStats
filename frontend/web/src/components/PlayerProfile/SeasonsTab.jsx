@@ -2,25 +2,31 @@ import React, { useState, useEffect } from 'react'
 import { integrationsApi } from '../../lib/integrationsApi'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../Card'
 import { Button } from '../Button'
-import { AlertCircle, Loader2, RefreshCw, Download, FileText, X } from 'lucide-react'
+import { AlertCircle, Loader2, RefreshCw, Download, FileText, Pencil, RotateCcw, X } from 'lucide-react'
 
-export default function SeasonsTab() {
+export default function SeasonsTab({ playerId, canEdit = false }) {
   const [games, setGames] = useState([])
   const [availableSeasons, setAvailableSeasons] = useState([])
   const [selectedSeason, setSelectedSeason] = useState('')
   const [selectedGame, setSelectedGame] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [editingKey, setEditingKey] = useState(null)
+  const [editValues, setEditValues] = useState({})
+  const [saving, setSaving] = useState(false)
+  const [feedback, setFeedback] = useState('')
+
+  const gameKey = (game) => `${game.source}|${game.seasonYear}|${game.gameId}`
 
   useEffect(() => {
     loadGameHistory()
-  }, [])
+  }, [playerId])
 
   const loadGameHistory = async (seasonYear = '') => {
     setLoading(true)
     setError('')
     try {
-      const response = await integrationsApi.fetchMyGameHistory(seasonYear)
+      const response = await integrationsApi.fetchMyGameHistory(seasonYear, playerId)
       setGames(response.games || [])
       setAvailableSeasons(response.availableSeasons || [])
       setSelectedSeason(response.selectedSeasonYear ?? '')
@@ -41,16 +47,79 @@ export default function SeasonsTab() {
     loadGameHistory(selectedSeason)
   }
 
+  const startEdit = (game) => {
+    setFeedback('')
+    setEditingKey(gameKey(game))
+    setEditValues({
+      goals: game.goals ?? 0,
+      assists: game.assists ?? 0,
+      pim: game.pim ?? 0,
+    })
+  }
+
+  const cancelEdit = () => {
+    setEditingKey(null)
+    setEditValues({})
+  }
+
+  const saveEdit = async (game) => {
+    setSaving(true)
+    setFeedback('')
+    try {
+      await integrationsApi.saveGameStats(playerId, {
+        source: game.source,
+        seasonYear: game.seasonYear,
+        gameId: game.gameId,
+        goals: Number(editValues.goals ?? 0),
+        assists: Number(editValues.assists ?? 0),
+        pim: Number(editValues.pim ?? 0),
+      })
+      cancelEdit()
+      setSelectedGame(null)
+      setFeedback('Saved. These numbers now override the scraped ones.')
+      await loadGameHistory(selectedSeason)
+    } catch (err) {
+      setFeedback(err.message || 'Failed to save the game stats')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const resetStats = async (game) => {
+    setSaving(true)
+    setFeedback('')
+    try {
+      const response = await integrationsApi.resetGameStats(playerId, {
+        source: game.source,
+        seasonYear: game.seasonYear,
+        gameId: game.gameId,
+      })
+      setSelectedGame(null)
+      setFeedback(response.message || 'Manual stats cleared.')
+      await loadGameHistory(selectedSeason)
+    } catch (err) {
+      setFeedback(err.message || 'Failed to clear the manual stats')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const selectedSeasonLabel = availableSeasons.find(
     (season) => season.seasonYear === selectedSeason
   )?.seasonLabel || 'Selected Season'
+
+  const formatResult = (game) => {
+    if (game.scoreFor == null || game.scoreAgainst == null) return '—'
+    const outcome = game.scoreFor > game.scoreAgainst ? 'W' : game.scoreFor < game.scoreAgainst ? 'L' : 'T'
+    return `${outcome} ${game.scoreFor}-${game.scoreAgainst}`
+  }
 
   const downloadCsv = () => {
     if (!games.length) return
 
     const headers = [
       'Date', 'Source', 'Game ID', 'Game Type', 'League',
-      'Team For', 'Team Against', 'Goals', 'Assists', 'Points', 'PIM'
+      'Team For', 'Team Against', 'Result', 'Goals', 'Assists', 'Points', 'PIM'
     ]
 
     const escapeCsv = (value) => {
@@ -69,6 +138,7 @@ export default function SeasonsTab() {
       g.league || '',
       g.teamFor || '',
       g.teamAgainst || '',
+      formatResult(g),
       g.goals ?? 0,
       g.assists ?? 0,
       g.points ?? 0,
@@ -101,6 +171,7 @@ export default function SeasonsTab() {
         <td>${g.gameId || ''}</td>
         <td>${g.teamFor || ''}</td>
         <td>${g.teamAgainst || ''}</td>
+        <td>${formatResult(g)}</td>
         <td style="text-align:right;">${g.goals ?? 0}</td>
         <td style="text-align:right;">${g.assists ?? 0}</td>
         <td style="text-align:right;">${g.points ?? 0}</td>
@@ -135,6 +206,7 @@ export default function SeasonsTab() {
                 <th>Game ID</th>
                 <th>Team</th>
                 <th>Opponent</th>
+                <th>Result</th>
                 <th>G</th>
                 <th>A</th>
                 <th>P</th>
@@ -166,7 +238,7 @@ export default function SeasonsTab() {
       <CardHeader>
         <CardTitle>Game History & Career Statistics</CardTitle>
         <CardDescription>
-          View per-game history across AYHL, THF, AHF, and NJHS for the selected season
+          View per-game history across AYHL, THF, AHF, NJHS, and MHR for the selected season
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -187,6 +259,20 @@ export default function SeasonsTab() {
                 Retry
               </Button>
             </div>
+          </div>
+        )}
+
+        {feedback && (
+          <div className="p-3 bg-primary-50 border border-primary-100 text-primary-800 rounded-md mb-4 text-sm flex items-center justify-between gap-2">
+            <span>{feedback}</span>
+            <button
+              type="button"
+              onClick={() => setFeedback('')}
+              className="text-primary-700 hover:text-primary-900"
+              aria-label="Dismiss"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
         )}
 
@@ -264,30 +350,92 @@ export default function SeasonsTab() {
                     <th className="text-left px-3 py-2">Game ID</th>
                     <th className="text-left px-3 py-2">Team</th>
                     <th className="text-left px-3 py-2">Opponent</th>
+                    <th className="text-left px-3 py-2">Result</th>
                     <th className="text-right px-3 py-2">G</th>
                     <th className="text-right px-3 py-2">A</th>
                     <th className="text-right px-3 py-2">P</th>
                     <th className="text-right px-3 py-2">PIM</th>
+                    {canEdit && <th className="text-right px-3 py-2">Actions</th>}
                   </tr>
                 </thead>
                 <tbody>
-                  {games.map((game, idx) => (
-                    <tr
-                      key={`${game.source}-${game.gameId}-${idx}`}
-                      className="border-t border-slate-200 hover:bg-slate-50 cursor-pointer"
-                      onClick={() => setSelectedGame(game)}
-                    >
-                      <td className="px-3 py-2">{game.gameDate || '—'}</td>
-                      <td className="px-3 py-2 font-medium">{game.source}</td>
-                      <td className="px-3 py-2">{game.gameId || '—'}</td>
-                      <td className="px-3 py-2">{game.teamFor || '—'}</td>
-                      <td className="px-3 py-2">{game.teamAgainst || '—'}</td>
-                      <td className="px-3 py-2 text-right">{game.goals ?? 0}</td>
-                      <td className="px-3 py-2 text-right">{game.assists ?? 0}</td>
-                      <td className="px-3 py-2 text-right font-semibold text-primary-700">{game.points ?? 0}</td>
-                      <td className="px-3 py-2 text-right">{game.pim ?? 0}</td>
-                    </tr>
-                  ))}
+                  {games.map((game, idx) => {
+                    const isEditing = editingKey === gameKey(game)
+                    const numInput = (field) => (
+                      <input
+                        type="number"
+                        min="0"
+                        max="99"
+                        value={editValues[field] ?? 0}
+                        onChange={(e) => setEditValues((prev) => ({ ...prev, [field]: e.target.value }))}
+                        className="w-14 px-1 py-0.5 border border-slate-300 rounded text-right"
+                      />
+                    )
+                    return (
+                      <tr
+                        key={`${game.source}-${game.gameId}-${idx}`}
+                        className="border-t border-slate-200 hover:bg-slate-50 cursor-pointer"
+                        onClick={() => setSelectedGame(game)}
+                      >
+                        <td className="px-3 py-2">{game.gameDate || '—'}</td>
+                        <td className="px-3 py-2 font-medium">{game.source}</td>
+                        <td className="px-3 py-2">{game.gameId || '—'}</td>
+                        <td className="px-3 py-2">{game.teamFor || '—'}</td>
+                        <td className="px-3 py-2">{game.teamAgainst || '—'}</td>
+                        <td className="px-3 py-2">{formatResult(game)}</td>
+                        <td className="px-3 py-2 text-right">{isEditing ? numInput('goals') : (game.goals ?? 0)}</td>
+                        <td className="px-3 py-2 text-right">{isEditing ? numInput('assists') : (game.assists ?? 0)}</td>
+                        <td className="px-3 py-2 text-right font-semibold text-primary-700">
+                          {isEditing
+                            ? Number(editValues.goals ?? 0) + Number(editValues.assists ?? 0)
+                            : (game.points ?? 0)}
+                        </td>
+                        <td className="px-3 py-2 text-right">{isEditing ? numInput('pim') : (game.pim ?? 0)}</td>
+                        {canEdit && (
+                          <td className="px-3 py-2 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                            {isEditing ? (
+                              <span className="inline-flex gap-1 items-center">
+                                <Button size="sm" onClick={() => saveEdit(game)} disabled={saving}>
+                                  {saving ? 'Saving...' : 'Save'}
+                                </Button>
+                                <Button size="sm" variant="outline" onClick={cancelEdit} disabled={saving}>
+                                  Cancel
+                                </Button>
+                              </span>
+                            ) : (
+                              <span className="inline-flex gap-1 items-center">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => startEdit(game)}
+                                  title="Enter the goals/assists this source is missing"
+                                >
+                                  <Pencil className="w-3.5 h-3.5 mr-1" />
+                                  Edit
+                                </Button>
+                                {game.statsEdited && (
+                                  <>
+                                    <span className="text-xs px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">
+                                      manual
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => resetStats(game)}
+                                      disabled={saving}
+                                      className="text-slate-500 hover:text-slate-800"
+                                      title="Use the scraped value again"
+                                    >
+                                      <RotateCcw className="w-4 h-4" />
+                                    </button>
+                                  </>
+                                )}
+                              </span>
+                            )}
+                          </td>
+                        )}
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
@@ -314,11 +462,17 @@ export default function SeasonsTab() {
                     <div><p className="text-slate-500">Season</p><p className="font-medium">{selectedGame.seasonLabel || '—'}</p></div>
                     <div><p className="text-slate-500">Team</p><p className="font-medium">{selectedGame.teamFor || '—'}</p></div>
                     <div><p className="text-slate-500">Opponent</p><p className="font-medium">{selectedGame.teamAgainst || '—'}</p></div>
+                    <div><p className="text-slate-500">Result</p><p className="font-medium">{formatResult(selectedGame)}</p></div>
                     <div><p className="text-slate-500">Goals</p><p className="font-medium">{selectedGame.goals ?? 0}</p></div>
                     <div><p className="text-slate-500">Assists</p><p className="font-medium">{selectedGame.assists ?? 0}</p></div>
                     <div><p className="text-slate-500">Points</p><p className="font-medium text-primary-700">{selectedGame.points ?? 0}</p></div>
                     <div><p className="text-slate-500">PIM</p><p className="font-medium">{selectedGame.pim ?? 0}</p></div>
                   </div>
+                  {selectedGame.statsEdited && (
+                    <p className="px-4 pb-2 text-sm text-amber-700">
+                      Goals/assists/PIM for this game were entered by hand and override the scraped values.
+                    </p>
+                  )}
                   <div className="border-t border-slate-200 p-4 flex justify-end">
                     <Button variant="outline" onClick={() => setSelectedGame(null)}>
                       Close

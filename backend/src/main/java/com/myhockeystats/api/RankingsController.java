@@ -3,6 +3,7 @@ package com.myhockeystats.api;
 import com.myhockeystats.model.User;
 import com.myhockeystats.repository.UserRepository;
 import com.myhockeystats.security.JwtUtil;
+import com.myhockeystats.service.PlayerProfileService;
 import com.myhockeystats.service.RankingLookupService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -35,6 +36,9 @@ public class RankingsController {
     @Autowired
     private RankingLookupService rankingLookupService;
 
+    @Autowired
+    private PlayerProfileService playerProfileService;
+
     private Optional<User> resolveUser(String authHeader) {
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             return Optional.empty();
@@ -43,15 +47,23 @@ public class RankingsController {
         return userRepository.findByEmail(email);
     }
 
-    /** GET /api/rankings — team + league rank per season for every identity link. */
+    /**
+     * GET /api/rankings — team + league rank per season for every identity link.
+     * Pass ?playerId= to scope the rankings to one player on the account.
+     */
     @GetMapping
     public ResponseEntity<?> rankings(
+            @RequestParam(value = "playerId", required = false) Long playerId,
             @RequestHeader(value = "Authorization", required = false) String authHeader) {
         Optional<User> user = resolveUser(authHeader);
         if (user.isEmpty()) {
             return ResponseEntity.status(401).body(Map.of("error", "Authentication required"));
         }
-        return ResponseEntity.ok(Map.of("rankings", rankingLookupService.forUser(user.get().getId())));
+        long uid = user.get().getId();
+        if (playerId != null && !playerProfileService.isLinked(uid, playerId)) {
+            return ResponseEntity.status(403).body(Map.of("error", "This player is not on your account"));
+        }
+        return ResponseEntity.ok(Map.of("rankings", rankingLookupService.forUser(uid, playerId)));
     }
 
     /**

@@ -12,6 +12,7 @@ const SOURCE_LABELS = {
   THF: 'THF',
   AHF: 'AHF',
   NJHS: 'NJ HS',
+  MHR: 'MHR',
 }
 
 function seasonStartYear(seasonValue) {
@@ -28,7 +29,7 @@ function fmt(n) {
   return Number(n ?? 0).toFixed(2)
 }
 
-export default function StatisticsTab({ seasonRecords }) {
+export default function StatisticsTab({ seasonRecords, playerId }) {
   const [gameHistory, setGameHistory] = useState([])
   const [loadingGames, setLoadingGames] = useState(true)
   const [gamesError, setGamesError] = useState('')
@@ -63,7 +64,7 @@ export default function StatisticsTab({ seasonRecords }) {
     setLoadingGames(true)
     setGamesError('')
     integrationsApi
-      .fetchMyGameHistory('')
+      .fetchMyGameHistory('', playerId)
       .then((resp) => {
         if (cancelled) return
         setGameHistory(resp.games || [])
@@ -79,7 +80,7 @@ export default function StatisticsTab({ seasonRecords }) {
         if (!cancelled) setLoadingGames(false)
       })
     integrationsApi
-      .fetchRankings()
+      .fetchRankings(playerId)
       .then((resp) => {
         if (!cancelled) setRankings(resp.rankings || [])
       })
@@ -93,7 +94,7 @@ export default function StatisticsTab({ seasonRecords }) {
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [playerId])
 
   // ── Career cards ────────────────────────────────────────────────────────
   const career = useMemo(() => {

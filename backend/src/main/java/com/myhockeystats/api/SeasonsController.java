@@ -150,7 +150,10 @@ public class SeasonsController {
     }
 
     @GetMapping("/me/seasons")
-    public ResponseEntity<?> getMySeasons(@RequestHeader(value = "Authorization", required = false) String authHeader) {
+    public ResponseEntity<?> getMySeasons(
+        @RequestHeader(value = "Authorization", required = false) String authHeader,
+        @RequestParam(value = "playerId", required = false) Long playerId
+    ) {
         String email = extractEmailFromAuthHeader(authHeader);
         if (email == null) {
             return ResponseEntity.status(401)
@@ -163,7 +166,11 @@ public class SeasonsController {
                 .body(new ErrorResponse("USER_NOT_FOUND", "User not found."));
         }
 
-        Optional<PlayerProfile> profileOpt = playerProfileService.getProfileByUserId(userOpt.get().getId());
+        Optional<PlayerProfile> profileOpt = playerId == null
+            ? playerProfileService.getProfileByUserId(userOpt.get().getId())
+            : playerProfileService.isLinked(userOpt.get().getId(), playerId)
+                ? playerProfileService.getProfileById(playerId)
+                : Optional.empty();
         if (profileOpt.isEmpty()) {
             return ResponseEntity.status(404)
                 .body(new ErrorResponse("PLAYER_NOT_FOUND", "Player profile not found."));
@@ -191,7 +198,8 @@ public class SeasonsController {
     @GetMapping("/me/game-history")
     public ResponseEntity<?> getMyGameHistory(
         @RequestHeader(value = "Authorization", required = false) String authHeader,
-        @RequestParam(value = "seasonYear", required = false) Integer seasonYear
+        @RequestParam(value = "seasonYear", required = false) Integer seasonYear,
+        @RequestParam(value = "playerId", required = false) Long playerId
     ) {
         String email = extractEmailFromAuthHeader(authHeader);
         if (email == null) {
@@ -205,7 +213,11 @@ public class SeasonsController {
                 .body(new ErrorResponse("USER_NOT_FOUND", "User not found."));
         }
 
-        Optional<PlayerProfile> profileOpt = playerProfileService.getProfileByUserId(userOpt.get().getId());
+        Optional<PlayerProfile> profileOpt = playerId == null
+            ? playerProfileService.getProfileByUserId(userOpt.get().getId())
+            : playerProfileService.isLinked(userOpt.get().getId(), playerId)
+                ? playerProfileService.getProfileById(playerId)
+                : Optional.empty();
         if (profileOpt.isEmpty()) {
             return ResponseEntity.status(404)
                 .body(new ErrorResponse("PLAYER_NOT_FOUND", "Player profile not found."));
