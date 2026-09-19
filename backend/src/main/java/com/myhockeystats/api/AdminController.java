@@ -3,12 +3,15 @@ package com.myhockeystats.api;
 import com.myhockeystats.model.User;
 import com.myhockeystats.repository.UserRepository;
 import com.myhockeystats.security.JwtUtil;
+import com.myhockeystats.service.DeepDiveService;
+import com.myhockeystats.service.PlayerProfileMergeService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -34,6 +37,12 @@ public class AdminController {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @Autowired
+    private DeepDiveService deepDiveService;
+
+    @Autowired
+    private PlayerProfileMergeService mergeService;
+
     private Optional<User> resolveAdmin(String authHeader) {
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             return Optional.empty();
@@ -43,9 +52,9 @@ public class AdminController {
     }
 
     /**
-     * GET /api/admin/players — all registered users ordered by registration
-     * time (newest first), with last login, identity-link count/sources, and
-     * the last time the deep-dive refreshed that user.
+     * GET /api/admin/players — all registered logins ordered by registration
+     * time (newest first), with last login, the players attached to the login,
+     * and how many source identities those players are linked to.
      */
     @GetMapping("/players")
     public ResponseEntity<?> listPlayers(
@@ -56,15 +65,16 @@ public class AdminController {
         String sql = """
             SELECT u.id, u.email, u.full_name AS user_name, u.is_admin,
                    u.created_at, u.last_login_at,
-                   pp.full_name AS profile_name,
-                   COUNT(pim.id) AS link_count,
-                   MAX(pim.last_verified_at) AS last_deep_dive_at,
-                   STRING_AGG(DISTINCT pim.source, ',') AS sources
+                   STRING_AGG(DISTINCT pp.full_name, ', ') AS profile_name,
+                   COUNT(DISTINCT up.player_id) AS player_count,
+                   COUNT(DISTINCT psl.id) AS link_count,
+                   STRING_AGG(DISTINCT psl.source, ',') AS sources,
+                   MAX(psl.last_verified_at) AS last_deep_dive_at
             FROM users u
-            LEFT JOIN player_profiles pp ON pp.user_id = u.id
-            LEFT JOIN player_identity_map pim ON pim.user_id = u.id
-            GROUP BY u.id, u.email, u.full_name, u.is_admin, u.created_at,
-                     u.last_login_at, pp.full_name
+            LEFT JOIN user_players up ON up.user_id = u.id
+            LEFT JOIN player_profiles pp ON pp.id = up.player_id
+            LEFT JOIN player_source_links psl ON psl.player_id = up.player_id
+            GROUP BY u.id, u.email, u.full_name, u.is_admin, u.created_at, u.last_login_at
             ORDER BY u.created_at DESC
             """;
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql);
@@ -72,9 +82,72 @@ public class AdminController {
     }
 
     /**
+     * GET /api/admin/profiles — every player profile with its owner and the
+     * logins attached to it, so an admin can spot duplicates (two profiles for
+     * one kid) and unowned/orphaned profiles. Newest first.
+     */
+    @GetMapping("/profiles")
+    public ResponseEntity<?> listProfiles(
+            @RequestHeader(value = "Authorization", required = false) String authHeader) {
+        if (resolveAdmin(authHeader).isEmpty()) {
+            return ResponseEntity.status(403).body(Map.of("error", "Admin access required"));
+        }
+        String sql = """
+            SELECT pp.id, pp.full_name AS profile_name, pp.birthdate, pp.position, pp.location,
+                   pp.owner_user_id, owner.email AS owner_email,
+                   creator.email AS created_by_email,
+                   pp.created_at,
+                   STRING_AGG(DISTINCT u.email, ', ') AS attached_logins,
+                   STRING_AGG(DISTINCT u.email, ', ')
+                       FILTER (WHERE up.can_edit) AS editors
+            FROM player_profiles pp
+            LEFT JOIN users owner ON owner.id = pp.owner_user_id
+            LEFT JOIN users creator ON creator.id = pp.created_by_user_id
+            LEFT JOIN user_players up ON up.player_id = pp.id
+            LEFT JOIN users u ON u.id = up.user_id
+            GROUP BY pp.id, pp.full_name, pp.birthdate, pp.position, pp.location,
+                     pp.owner_user_id, owner.email, creator.email, pp.created_at
+            ORDER BY pp.created_at DESC, pp.id DESC
+            """;
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql);
+        return ResponseEntity.ok(Map.of("profiles", rows));
+    }
+
+    /**
+     * POST /api/admin/profiles/{sourceId}/merge — fold a duplicate profile into
+     * the profile that should survive, then delete the duplicate. The two
+     * profiles must carry the same player name; everything attached to the
+     * duplicate (seasons, games, manual G/A, source links, logins) is moved.
+     */
+    @PostMapping("/profiles/{sourceId}/merge")
+    public ResponseEntity<?> mergeProfiles(
+            @PathVariable Long sourceId,
+            @RequestBody(required = false) Map<String, Object> body,
+            @RequestHeader(value = "Authorization", required = false) String authHeader) {
+        if (resolveAdmin(authHeader).isEmpty()) {
+            return ResponseEntity.status(403).body(Map.of("error", "Admin access required"));
+        }
+        Object rawTarget = body == null ? null : body.get("targetProfileId");
+        if (rawTarget == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "targetProfileId is required"));
+        }
+        long targetId;
+        try {
+            targetId = Long.parseLong(String.valueOf(rawTarget).trim());
+        } catch (NumberFormatException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", "targetProfileId must be a number"));
+        }
+        try {
+            return ResponseEntity.ok(mergeService.merge(sourceId, targetId));
+        } catch (PlayerProfileMergeService.MergeRejectedException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /**
      * POST /api/admin/deep-dive/{userId} — enqueue a FULL (all-seasons) deep-dive
-     * for a user. The Mac mini poller picks it up and runs the per-user
-     * full-career scrape. Dedupes against pending/running requests.
+     * for every player attached to a login. Requests are deduped per player, so
+     * logins sharing a player never trigger duplicate scrapes.
      */
     @PostMapping("/deep-dive/{userId}")
     public ResponseEntity<?> triggerDeepDive(
@@ -83,27 +156,10 @@ public class AdminController {
         if (resolveAdmin(authHeader).isEmpty()) {
             return ResponseEntity.status(403).body(Map.of("error", "Admin access required"));
         }
-        List<Integer> pending = jdbcTemplate.queryForList(
-            "SELECT 1 FROM deep_dive_requests WHERE user_id = ? AND status IN ('PENDING','RUNNING') LIMIT 1",
-            Integer.class, userId);
-        if (!pending.isEmpty()) {
-            return ResponseEntity.ok(Map.of(
-                "message", "A deep-dive is already queued or running for this user.",
-                "queued", false));
-        }
-        jdbcTemplate.update(
-            "INSERT INTO deep_dive_requests (id, user_id, scope, status, requested_at) " +
-            "VALUES (gen_random_uuid(), ?, 'ALL_SEASONS', 'PENDING', NOW())",
-            userId);
-        jdbcTemplate.update(
-            "INSERT INTO notifications (id, user_id, type, title, message, status) " +
-            "VALUES (gen_random_uuid(), ?, 'DEEP_DIVE', ?, ?, 'ACTIVE') " +
-            "ON CONFLICT (user_id, type, status) DO NOTHING",
-            userId, "Stats are being retrieved",
-            "We're pulling together your game history and season stats. This usually takes a few minutes.");
+        DeepDiveService.QueueResult result = deepDiveService.enqueueForUser(userId);
         return ResponseEntity.ok(Map.of(
-            "message", "Full (all-seasons) deep-dive queued for user " + userId + ".",
-            "queued", true));
+            "message", result.message(),
+            "queued", result.queued()));
     }
 
     /** GET /api/admin/messages — all support/report messages, NEW first. */

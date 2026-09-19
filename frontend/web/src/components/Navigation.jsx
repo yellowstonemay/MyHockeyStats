@@ -2,7 +2,7 @@ import React from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../lib/AuthContext'
 import { Button } from './Button'
-import { Trophy, Settings, LogOut } from 'lucide-react'
+import { Trophy, LogOut, Users, LayoutDashboard } from 'lucide-react'
 
 export default function Navigation() {
   const navigate = useNavigate()
@@ -37,14 +37,23 @@ export default function Navigation() {
                 <span className="hidden sm:inline">Admin</span>
               </button>
             )}
-            <button 
-              onClick={() => navigate('/profile')}
-              title="Profile"
-              aria-label="Profile"
+            <button
+              onClick={() => navigate('/dashboard')}
+              title="Dashboard"
+              aria-label="Dashboard"
               className="flex items-center space-x-2 text-slate-600 hover:text-slate-900 transition-colors"
             >
-              <Settings className="w-5 h-5" />
-              <span className="hidden sm:inline">Profile</span>
+              <LayoutDashboard className="w-5 h-5" />
+              <span className="hidden sm:inline">Dashboard</span>
+            </button>
+            <button
+              onClick={() => navigate('/players')}
+              title="My Players"
+              aria-label="My Players"
+              className="flex items-center space-x-2 text-slate-600 hover:text-slate-900 transition-colors"
+            >
+              <Users className="w-5 h-5" />
+              <span className="hidden sm:inline">My Players</span>
             </button>
             <Button 
               variant="ghost" 

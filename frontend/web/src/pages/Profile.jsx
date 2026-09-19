@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { useAuth } from '../lib/AuthContext'
 import { integrationsApi } from '../lib/integrationsApi'
 import { Button } from '../components/Button'
@@ -22,6 +22,7 @@ export default function Profile() {
   const [location, setLocation] = useState('')
   const [position, setPosition] = useState('')
   const [saved, setSaved] = useState(false)
+  const [canEdit, setCanEdit] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -37,6 +38,7 @@ export default function Profile() {
         setBirthMonthYear(p.birthMonthYear || '')
         setLocation(p.location || '')
         setPosition(p.position || '')
+        setCanEdit(!!p.canEdit)
       })
       .catch(() => {})
     return () => {
@@ -60,6 +62,7 @@ export default function Profile() {
         setBirthMonthYear(p.birthMonthYear || '')
         setLocation(p.location || '')
         setPosition(p.position || '')
+        setCanEdit(!!p.canEdit)
       }
       setSaved(true)
       setTimeout(() => setSaved(false), 3000)
@@ -132,6 +135,13 @@ export default function Profile() {
               <CardDescription>Keep your information up to date</CardDescription>
             </CardHeader>
             <CardContent>
+              <p className="text-sm text-slate-600 mb-4">
+                This is your default player. Managing more than one player?{' '}
+                <Link to="/players" className="text-primary-600 hover:underline font-medium">
+                  Go to My Players
+                </Link>
+                .
+              </p>
               {saved && (
                 <div className="p-3 bg-green-100 border border-green-400 text-green-700 rounded-md mb-6 text-sm">
                   ✓ Profile saved successfully
@@ -230,7 +240,7 @@ export default function Profile() {
 
         {/* Seasons Tab */}
         {activeTab === 'seasons' && (
-          <SeasonsTab />
+          <SeasonsTab canEdit={canEdit} />
         )}
       </div>
     </div>

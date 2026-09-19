@@ -23,6 +23,9 @@ const SUPPORT_CATEGORIES = ['Incorrect data', 'Missing season', 'Wrong player li
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState('overview')
+  const [players, setPlayers] = useState([])
+  const [playersReady, setPlayersReady] = useState(false)
+  const [selectedPlayerId, setSelectedPlayerId] = useState('')
   const [seasonRecords, setSeasonRecords] = useState([])
   const [seasonsLoading, setSeasonsLoading] = useState(false)
   const [seasonsError, setSeasonsError] = useState('')
@@ -97,11 +100,11 @@ export default function Dashboard() {
     return Object.values(map).sort((a, b) => b.games - a.games)
   }, [seasonRecords])
 
-  const loadSeasons = async () => {
+  const loadSeasons = async (playerId = selectedPlayerId) => {
     setSeasonsLoading(true)
     setSeasonsError('')
     try {
-      const response = await integrationsApi.fetchMySeasons('')
+      const response = await integrationsApi.fetchMySeasons('', playerId)
       setSeasonRecords(response.records || [])
     } catch (err) {
       setSeasonsError(err.message || 'Failed to load season data')
@@ -109,6 +112,36 @@ export default function Dashboard() {
       setSeasonsLoading(false)
     }
   }
+
+  useEffect(() => {
+    integrationsApi.fetchMyPlayers().then((response) => {
+      const availablePlayers = response.players || []
+      setPlayers(availablePlayers)
+      const primary = availablePlayers.find((player) => player.isPrimary)
+      setSelectedPlayerId(primary ? String(primary.id) : '')
+    }).catch(() => {
+      // The dashboard can still use the default-player endpoint if player loading fails.
+    }).finally(() => {
+      setPlayersReady(true)
+    })
+  }, [])
+
+  // The selected player drives every tab, so reload the career numbers whenever
+  // it changes — dropping the previous player's rows so nothing stale is shown.
+  useEffect(() => {
+    if (!playersReady) return
+    setEditingKey(null)
+    setEditValues({})
+    setSeasonRecords([])
+    loadSeasons(selectedPlayerId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playersReady, selectedPlayerId])
+
+  const handlePlayerChange = (event) => {
+    setSelectedPlayerId(event.target.value)
+  }
+
+  const selectedPlayer = players.find((player) => String(player.id) === selectedPlayerId) || null
 
   const recordKey = (r) => `${r.source || 'src'}|${r.sourcePlayerId || ''}|${r.season || ''}`
 
@@ -152,18 +185,6 @@ export default function Dashboard() {
     }
   }
 
-  useEffect(() => {
-    if (seasonRecords.length === 0 && !seasonsLoading && !seasonsError) {
-      loadSeasons()
-    }
-  }, [])
-
-  useEffect(() => {
-    if ((activeTab === 'seasons' || activeTab === 'stats') && seasonRecords.length === 0 && !seasonsLoading && !seasonsError) {
-      loadSeasons()
-    }
-  }, [activeTab, seasonRecords.length, seasonsLoading, seasonsError])
-
   return (
     <div className="min-h-screen bg-slate-50">
       {/* Sidebar & Content */}
@@ -200,12 +221,54 @@ export default function Dashboard() {
 
           {/* Main Content */}
           <div className="lg:col-span-3">
+            {/* Persistent player selector — drives every player-scoped tab */}
+            <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2">
+              {players.length > 1 ? (
+                <label className="flex items-center gap-2 text-sm text-slate-600">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Viewing player</span>
+                  <select
+                    value={selectedPlayerId}
+                    onChange={handlePlayerChange}
+                    className="input min-w-[190px] py-2"
+                    aria-label="Viewing player"
+                  >
+                    {players.map((player) => (
+                      <option key={player.id} value={player.id}>
+                        {player.fullName}{player.isPrimary ? ' (Default)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : selectedPlayer ? (
+                <div className="text-sm text-slate-600">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Viewing player</span>{' '}
+                  <span className="font-medium text-slate-900">{selectedPlayer.fullName}</span>
+                </div>
+              ) : null}
+              {activeTab === 'following' && (
+                <p className="text-xs text-slate-500">Following is shared across every player on your account.</p>
+              )}
+            </div>
+
+            {!playersReady ? (
+              <Card>
+                <CardContent className="py-12 flex items-center justify-center text-slate-500">
+                  <Loader2 className="w-5 h-5 animate-spin mr-2" />
+                  <span>Loading your players…</span>
+                </CardContent>
+              </Card>
+            ) : (
+            <>
             {activeTab === 'overview' && (
               <div className="space-y-6">
                 <Card>
                   <CardHeader>
-                    <CardTitle>Welcome Back!</CardTitle>
-                    <CardDescription>Here's your hockey stats overview</CardDescription>
+                    <div>
+                      <CardTitle>Welcome Back!</CardTitle>
+                      <CardDescription>
+                        {selectedPlayer ? `${selectedPlayer.fullName}'s hockey stats overview` : "Here's your hockey stats overview"}
+                      </CardDescription>
+                    </div>
                   </CardHeader>
                   <CardContent>
                     {seasonsLoading && (
@@ -237,9 +300,9 @@ export default function Dashboard() {
                   </CardContent>
                 </Card>
 
-                <ActivityFeed />
+                <ActivityFeed playerId={selectedPlayerId} />
 
-                <MyLeagues onViewReport={() => setActiveTab('report')} />
+                <MyLeagues playerId={selectedPlayerId} onViewReport={() => setActiveTab('report')} />
 
                 <Card>
                   <CardHeader>
@@ -353,7 +416,7 @@ export default function Dashboard() {
                         <AlertCircle className="w-5 h-5" />
                         <span>{seasonsError}</span>
                       </div>
-                      <Button onClick={loadSeasons} variant="outline" size="sm" disabled={seasonsLoading}>
+                      <Button onClick={() => loadSeasons(selectedPlayerId)} variant="outline" size="sm" disabled={seasonsLoading}>
                         <RefreshCw className="w-4 h-4 mr-2" />
                         Retry
                       </Button>
@@ -441,11 +504,11 @@ export default function Dashboard() {
             )}
 
             {activeTab === 'games' && (
-              <SeasonsTab />
+              <SeasonsTab playerId={selectedPlayerId} canEdit={!!selectedPlayer?.canEdit} />
             )}
 
             {activeTab === 'stats' && (
-              <StatisticsTab seasonRecords={seasonRecords} />
+              <StatisticsTab seasonRecords={seasonRecords} playerId={selectedPlayerId} />
             )}
 
             {activeTab === 'following' && (
@@ -453,7 +516,9 @@ export default function Dashboard() {
             )}
 
             {activeTab === 'report' && (
-              <ReportTab />
+              <ReportTab playerId={selectedPlayerId} />
+            )}
+            </>
             )}
           </div>
         </div>

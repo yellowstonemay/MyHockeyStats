@@ -11,9 +11,22 @@ public class PlayerProfile {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @OneToOne
-    @JoinColumn(name = "user_id", nullable = false)
-    private User user;
+    /**
+     * The login that originally created this player. Ownership/access is NOT
+     * derived from this column — it is derived from the {@code user_players}
+     * link table, because a player can be attached to many logins.
+     */
+    @ManyToOne
+    @JoinColumn(name = "created_by_user_id")
+    private User createdBy;
+
+    /**
+     * The login that owns this player: the account that may edit the profile,
+     * enter manual stats and hand out edit rights. Null on legacy rows that
+     * were created before ownership existed.
+     */
+    @Column(name = "owner_user_id")
+    private Long ownerUserId;
 
     @Column(nullable = false)
     private String fullName;
@@ -32,8 +45,19 @@ public class PlayerProfile {
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
 
-    public User getUser() { return user; }
-    public void setUser(User user) { this.user = user; }
+    public User getCreatedBy() { return createdBy; }
+    public void setCreatedBy(User createdBy) { this.createdBy = createdBy; }
+
+    public Long getOwnerUserId() { return ownerUserId; }
+    public void setOwnerUserId(Long ownerUserId) { this.ownerUserId = ownerUserId; }
+
+    /** @deprecated use {@link #getCreatedBy()} — access is via user_players now. */
+    @Deprecated
+    public User getUser() { return createdBy; }
+
+    /** @deprecated use {@link #setCreatedBy(User)}. */
+    @Deprecated
+    public void setUser(User user) { this.createdBy = user; }
 
     public String getFullName() { return fullName; }
     public void setFullName(String fullName) { this.fullName = fullName; }
