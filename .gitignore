@@ -20,6 +20,13 @@ __pycache__/
 # Deployment artifacts
 *.tar.gz
 
+# OAuth provider credential downloads (Google/Facebook client secrets)
+oauth/
+**/client_secret_*.json
+
+# Local credentials for deployed environments (never publish)
+LOCAL_CREDENTIALS.md
+
 # Scraped binary / progress state
 scripts/thf-js/data/scoresheet/
 scripts/ayhl/data/player_games/

@@ -9,13 +9,21 @@ import SignUp from './pages/SignUp'
 import SignIn from './pages/SignIn'
 import Dashboard from './pages/Dashboard'
 import Profile from './pages/Profile'
+import Players from './pages/Players'
+import OAuthCallback from './pages/OAuthCallback'
+import VerifyEmail from './pages/VerifyEmail'
+import ForgotPassword from './pages/ForgotPassword'
+import ResetPassword from './pages/ResetPassword'
 import ParentPlayerHistoryPage from './pages/ParentPlayerHistoryPage'
 import IntegrationAdminPage from './pages/IntegrationAdminPage'
 import AdminPlayersPage from './pages/AdminPlayersPage'
 
 function AppRoutes() {
   const location = useLocation()
-  const hideGlobalNavigation = ['/', '/signin', '/signup'].includes(location.pathname)
+  const hideGlobalNavigation = [
+    '/', '/signin', '/signup', '/oauth/callback', '/verify-email',
+    '/forgot-password', '/reset-password',
+  ].includes(location.pathname)
 
   return (
     <>
@@ -25,6 +33,18 @@ function AppRoutes() {
         <Route path="/" element={<Home />} />
         <Route path="/signup" element={<SignUp />} />
         <Route path="/signin" element={<SignIn />} />
+        <Route path="/oauth/callback" element={<OAuthCallback />} />
+        <Route path="/verify-email" element={<VerifyEmail />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
+        <Route
+          path="/players"
+          element={
+            <ProtectedRoute>
+              <Players />
+            </ProtectedRoute>
+          }
+        />
         <Route
           path="/dashboard"
           element={

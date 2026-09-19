@@ -4,6 +4,7 @@ import { useAuth } from '../lib/AuthContext'
 import { Button } from '../components/Button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/Card'
 import { Input } from '../components/Input'
+import SocialSignInButtons from '../components/SocialSignInButtons'
 import { api } from '../lib/utils'
 import { Trophy } from 'lucide-react'
 
@@ -14,10 +15,15 @@ export default function SignIn() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  // Set when the server says the address has not been confirmed yet.
+  const [needsVerification, setNeedsVerification] = useState(false)
+  const [resent, setResent] = useState(false)
+  const [resending, setResending] = useState(false)
 
   const handleSignIn = async (e) => {
     e.preventDefault()
     setError('')
+    setResent(false)
 
     if (!email || !password) {
       setError('Please fill in all fields')
@@ -27,12 +33,30 @@ export default function SignIn() {
     setLoading(true)
     try {
       const response = await api.login(email, password)
-      login(response.accessToken || response.token, { email, isAdmin: !!response.isAdmin })
-      navigate('/dashboard')
+      login(response.accessToken || response.token, {
+        email,
+        isAdmin: !!response.isAdmin,
+        hasPlayer: !!response.hasPlayer,
+      })
+      navigate(response.hasPlayer === false ? '/players' : '/dashboard')
     } catch (err) {
+      setNeedsVerification(err.code === 'EMAIL_NOT_VERIFIED')
       setError(err.message || 'Failed to sign in')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleResend = async () => {
+    setResending(true)
+    setResent(false)
+    try {
+      await api.resendVerification(email)
+      setResent(true)
+    } catch (err) {
+      setError(err.message || 'Could not resend the email')
+    } finally {
+      setResending(false)
     }
   }
 
@@ -46,11 +70,30 @@ export default function SignIn() {
           <CardTitle>Sign In</CardTitle>
           <CardDescription>Welcome back to MyHockeyStats</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-6">
           <form onSubmit={handleSignIn} className="space-y-4">
             {error && (
               <div className="p-3 bg-red-100 border border-red-400 text-red-700 rounded-md text-sm">
                 {error}
+              </div>
+            )}
+
+            {needsVerification && (
+              <div className="space-y-2">
+                {resent && (
+                  <div className="p-3 bg-green-100 border border-green-400 text-green-700 rounded-md text-sm">
+                    If that address has an unconfirmed account, a new link is on its way.
+                  </div>
+                )}
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full"
+                  disabled={resending}
+                  onClick={handleResend}
+                >
+                  {resending ? 'Sending…' : 'Resend confirmation email'}
+                </Button>
               </div>
             )}
 
@@ -66,7 +109,15 @@ export default function SignIn() {
             </div>
 
             <div>
-              <label className="label">Password</label>
+              <div className="flex items-center justify-between">
+                <label className="label">Password</label>
+                <Link
+                  to="/forgot-password"
+                  className="text-xs text-primary-600 hover:underline mb-1"
+                >
+                  Forgot password?
+                </Link>
+              </div>
               <Input
                 type="password"
                 placeholder="••••••••"
@@ -85,7 +136,11 @@ export default function SignIn() {
             </Button>
           </form>
 
-          <p className="text-center text-sm text-slate-600 mt-4">
+          {/* Divider + social sign-in sit AFTER the form: "or" separates the
+              two ways to sign in. */}
+          <SocialSignInButtons disabled={loading} />
+
+          <p className="text-center text-sm text-slate-600">
             Don't have an account?{' '}
             <Link to="/signup" className="text-primary-600 hover:underline font-medium">
               Create one

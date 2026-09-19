@@ -12,6 +12,19 @@ spring:
     hibernate:
       ddl-auto: update
     show-sql: false
+  # SMTP transport settings. The host/credentials themselves come from the
+  # environment (SPRING_MAIL_HOST/PORT/USERNAME/PASSWORD) so that no mail sender
+  # is created when none is configured. STARTTLS is NOT on by default in
+  # Spring/JavaMail, but port 587 (Resend, SES, SendGrid, Gmail) requires it —
+  # without these the server rejects the AUTH with "Authentication failed".
+  mail:
+    properties:
+      mail.smtp.auth: true
+      mail.smtp.starttls.enable: true
+      mail.smtp.starttls.required: true
+      mail.smtp.connectiontimeout: 10000
+      mail.smtp.timeout: 10000
+      mail.smtp.writetimeout: 10000
 
 logging:
   level:
@@ -19,6 +32,37 @@ logging:
     org.springframework.web: INFO
 
 app:
+  auth:
+    # Password signup creates an UNVERIFIED account and emails a confirmation
+    # link; sign-in is refused until the link is opened. Social sign-in is
+    # exempt (Google/Facebook already verified the address).
+    require-email-verification: ${APP_REQUIRE_EMAIL_VERIFICATION:true}
+    # Public origin used to build the verification link.
+    public-base-url: ${APP_PUBLIC_BASE_URL:https://youthhockeystats.us}
+    mail-from: "${APP_MAIL_FROM:MyHockeyStats <no-reply@youthhockeystats.us>}"
+    verification-ttl-hours: ${APP_VERIFICATION_TTL_HOURS:24}
+    # Password-reset links are shorter-lived: a working link lets anyone with
+    # access to the inbox take over the account.
+    reset-ttl-minutes: ${APP_RESET_TTL_MINUTES:60}
+    # Minimum seconds between two verification emails for the same account.
+    resend-cooldown-seconds: ${APP_RESEND_COOLDOWN_SECONDS:60}
+  # Social sign-in. Credentials come from the environment; a provider is only
+  # offered in the UI once both its client id and secret are set.
+  oauth:
+    # Where the backend sends the browser after a successful social sign-in.
+    # The SPA route trades the one-time code for a JWT.
+    frontend-callback-url: ${APP_OAUTH_FRONTEND_CALLBACK_URL:http://localhost:5173/oauth/callback}
+    providers:
+      google:
+        client-id: ${GOOGLE_CLIENT_ID:}
+        client-secret: ${GOOGLE_CLIENT_SECRET:}
+        # Must EXACTLY match a redirect URI registered with the provider.
+        # Production is already registered as .../api/auth/oauth2/callback/google.
+        redirect-uri: ${GOOGLE_REDIRECT_URI:http://localhost:8080/api/auth/oauth2/callback/google}
+      facebook:
+        client-id: ${FACEBOOK_CLIENT_ID:}
+        client-secret: ${FACEBOOK_CLIENT_SECRET:}
+        redirect-uri: ${FACEBOOK_REDIRECT_URI:https://youthhockeystats.us/api/auth/oauth2/callback/facebook}
   ai:
     enabled: true
     provider: deepseek
