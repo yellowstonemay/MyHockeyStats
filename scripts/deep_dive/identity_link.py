@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
-"""Batch identity auto-linker for registered MyHockeyStats users.
+"""Batch identity auto-linker: player profiles -> source player records.
 
-For every registered user (with a player profile or user full name), find their
-source player record(s) across AYHL / THF / AHF career tables using the same
-canonical name-normalization logic as the backend (CareerLookupService):
+Links are stored per PLAYER (player_source_links), not per login. A player can
+be attached to several logins, so a scrape is only ever needed once per player —
+that is what lets the deep-dive refresh "a player who may belong to 1-many
+logins".
+
+For every player profile, find their source player record(s) across
+AYHL / THF / AHF / NJHS career tables using the same canonical name-normalization
+logic as the backend (CareerLookupService):
 
   - normalize: lowercase, trim, strip ' - . , collapse whitespace
   - canonical: strip whitespace/commas/quotes/dots/dashes -> contiguous key
@@ -14,19 +19,19 @@ Rules:
   - Multiple distinct player_ids in a source           -> ambiguous, skip (report)
   - Zero matches                                       -> no link (report)
 
-Idempotent: existing links are refreshed via ON CONFLICT (user_id, source).
+Idempotent: existing links are refreshed via ON CONFLICT (player_id, source).
 
 Usage:
-    python identity_link.py                  # all registered users
+    python identity_link.py                  # all player profiles
     python identity_link.py --dry-run        # show what would be linked
-    python identity_link.py --email x@y.z    # just one user
+    python identity_link.py --email x@y.z    # only players owned by that login
+    python identity_link.py --player-id 12   # only one player
 """
 from __future__ import annotations
 
 import argparse
 import os
 import re
-import sys
 from typing import Optional
 
 import psycopg2
@@ -87,32 +92,33 @@ def get_conn():
     )
 
 
-def load_users(conn, email_filter: Optional[str] = None) -> list[dict]:
+def load_players(conn, email_filter: Optional[str] = None,
+                 player_id: Optional[int] = None) -> list[dict]:
+    """Every player profile, with the logins attached to it (for reporting)."""
     sql = """
-        SELECT u.id AS user_id, u.email, u.full_name AS user_name,
-               pp.full_name AS profile_name, pp.birthdate, pp.location
-        FROM users u
-        LEFT JOIN player_profiles pp ON pp.user_id = u.id
+        SELECT pp.id AS player_id, pp.full_name, pp.birthdate, pp.location,
+               string_agg(DISTINCT u.email, '; ') AS user_emails
+        FROM player_profiles pp
+        LEFT JOIN user_players up ON up.player_id = pp.id
+        LEFT JOIN users u ON u.id = up.user_id
     """
-    params = []
+    params: list = []
+    where = []
+    if player_id is not None:
+        where.append("pp.id = %s")
+        params.append(player_id)
     if email_filter:
-        sql += " WHERE u.email = %s"
+        where.append(
+            "EXISTS (SELECT 1 FROM user_players up2 JOIN users u2 ON u2.id = up2.user_id "
+            "WHERE up2.player_id = pp.id AND u2.email = %s)")
         params.append(email_filter)
-    sql += " ORDER BY u.id"
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " GROUP BY pp.id, pp.full_name, pp.birthdate, pp.location ORDER BY pp.id"
+
     with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
         cur.execute(sql, params)
-        rows = cur.fetchall()
-    out = []
-    for r in rows:
-        full_name = (r["profile_name"] or r["user_name"] or "").strip()
-        out.append({
-            "user_id": r["user_id"],
-            "email": r["email"],
-            "full_name": full_name,
-            "birthdate": r["birthdate"],
-            "location": r["location"],
-        })
-    return out
+        return [dict(r) for r in cur.fetchall()]
 
 
 def find_candidates(conn, source: str, keys: list[str]) -> list[dict]:
@@ -154,15 +160,15 @@ def find_roster_candidates(conn, source: str, keys: list[str]) -> list[dict]:
         return [dict(r) for r in cur.fetchall()]
 
 
-def upsert_link(conn, user_id: int, source: str, player_id: str, player_name: str,
-                dry_run: bool) -> str:
+def upsert_link(conn, player_id: int, source: str, source_player_id: str,
+                player_name: str, dry_run: bool, owner_emails: Optional[str]) -> str:
     sql = """
-        INSERT INTO player_identity_map
-            (id, user_id, source, source_player_id, link_state, match_method,
+        INSERT INTO player_source_links
+            (id, player_id, source, source_player_id, link_state, match_method,
              confidence_score, confirmed_at, last_verified_at, created_at, updated_at)
         VALUES (gen_random_uuid(), %s, %s, %s, 'CONFIRMED', 'AUTO_NAME_MATCH',
                 1.0, NOW(), NOW(), NOW(), NOW())
-        ON CONFLICT (user_id, source) DO UPDATE SET
+        ON CONFLICT (player_id, source) DO UPDATE SET
             source_player_id = EXCLUDED.source_player_id,
             link_state       = 'CONFIRMED',
             match_method     = 'AUTO_NAME_MATCH',
@@ -170,41 +176,46 @@ def upsert_link(conn, user_id: int, source: str, player_id: str, player_name: st
             last_verified_at = NOW(),
             updated_at       = NOW()
     """
+    who = f", logins: {owner_emails}" if owner_emails else ""
     if dry_run:
-        return f"[dry-run] would link user {user_id} {source}->{player_id} ({player_name})"
+        return (f"[dry-run] would link player {player_id} {source}->{source_player_id} "
+                f"({player_name}){who}")
     with conn.cursor() as cur:
-        cur.execute(sql, (user_id, source, player_id))
+        cur.execute(sql, (player_id, source, source_player_id))
     conn.commit()
-    return f"linked user {user_id} {source}->{player_id} ({player_name})"
+    return f"linked player {player_id} {source}->{source_player_id} ({player_name}){who}"
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--email", help="only process this user email")
+    ap.add_argument("--email", help="only players attached to this login email")
+    ap.add_argument("--player-id", type=int, help="only this player profile id")
     ap.add_argument("--dry-run", action="store_true", help="show actions without writing")
     args = ap.parse_args()
 
     conn = get_conn()
     try:
-        users = load_users(conn, args.email)
-        if not users:
-            print("No registered users found.")
+        players = load_players(conn, args.email, args.player_id)
+        if not players:
+            print("No player profiles found.")
             return
-        print(f"Processing {len(users)} registered user(s)...")
-        for u in users:
-            if not u["full_name"]:
-                print(f"  user {u['user_id']} ({u['email']}): no name, skipping")
+        print(f"Processing {len(players)} player profile(s)...")
+        for p in players:
+            name = (p["full_name"] or "").strip()
+            if not name:
+                print(f"  player {p['player_id']}: no name, skipping")
                 continue
-            keys = canonical_keys(u["full_name"])
+            keys = canonical_keys(name)
             if not keys:
-                print(f"  user {u['user_id']} ({u['email']}): could not normalize name, skipping")
+                print(f"  player {p['player_id']}: could not normalize name, skipping")
                 continue
-            print(f"  user {u['user_id']} ({u['email']}) '{u['full_name']}' keys={keys}")
+            print(f"  player {p['player_id']} '{name}' "
+                  f"(logins: {p['user_emails'] or 'none'}) keys={keys}")
             for source in SOURCE_TABLES:
                 # NJ HS deep-dive is only for high-school-age players who live
                 # in New Jersey (avoid matching same-name players elsewhere).
                 if source == "NJHS":
-                    ok, reason = njhs_guard.qualifies_for_njhs(u["birthdate"], u["location"])
+                    ok, reason = njhs_guard.qualifies_for_njhs(p["birthdate"], p["location"])
                     if not ok:
                         print(f"    NJHS: skipped ({reason})")
                         continue
@@ -217,7 +228,9 @@ def main() -> None:
                     continue
                 if len(cands) == 1:
                     c = cands[0]
-                    print(f"    {source}: {upsert_link(conn, u['user_id'], source, c['source_player_id'], c['player_name'], args.dry_run)}")
+                    print("    " + upsert_link(conn, p["player_id"], source,
+                                               c["source_player_id"], c["player_name"],
+                                               args.dry_run, p["user_emails"]))
                 else:
                     ids = ", ".join(c["source_player_id"] for c in cands)
                     print(f"    {source}: AMBIGUOUS ({len(cands)} players: {ids}) - skipped")

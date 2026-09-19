@@ -1,6 +1,6 @@
 package com.myhockeystats.service.integration;
 
-import com.myhockeystats.repository.PlayerProfileRepository;
+import com.myhockeystats.service.PlayerProfileService;
 import java.sql.Timestamp;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -19,20 +19,22 @@ import org.springframework.stereotype.Service;
 public class IntegrationDataService {
 
     private final JdbcTemplate jdbcTemplate;
-    private final PlayerProfileRepository playerProfileRepository;
+    private final PlayerProfileService playerProfileService;
     private final IdentityNormalizationService identityNormalizationService;
 
     public IntegrationDataService(
             JdbcTemplate jdbcTemplate,
-            PlayerProfileRepository playerProfileRepository,
+            PlayerProfileService playerProfileService,
             IdentityNormalizationService identityNormalizationService) {
         this.jdbcTemplate = jdbcTemplate;
-        this.playerProfileRepository = playerProfileRepository;
+        this.playerProfileService = playerProfileService;
         this.identityNormalizationService = identityNormalizationService;
     }
 
     public Optional<PlayerContext> getPlayerContext(Long userId, String fallbackFullName, int fallbackBirthYear, int fallbackBirthMonth) {
-        return playerProfileRepository.findByUserId(userId)
+        // A login can own several players now — use its primary (default) one.
+        return playerProfileService.getPrimaryPlayerForUser(userId)
+                .filter(profile -> profile.getBirthdate() != null)
                 .map(profile -> new PlayerContext(
                         userId,
                         profile.getFullName(),

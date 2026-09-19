@@ -1,13 +1,18 @@
 package com.myhockeystats.api;
 
+import com.myhockeystats.model.PlayerProfile;
 import com.myhockeystats.model.User;
 import com.myhockeystats.repository.UserRepository;
 import com.myhockeystats.security.JwtUtil;
+import com.myhockeystats.service.PlayerProfileService;
+import com.myhockeystats.service.PlayerSourceLinkService;
+import com.myhockeystats.service.integration.MhrGameLookupService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
 
 import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.*;
 
 /**
@@ -54,14 +59,23 @@ public class FollowController {
     private final JwtUtil jwtUtil;
     private final UserRepository userRepository;
     private final JdbcTemplate jdbcTemplate;
+    private final PlayerSourceLinkService playerSourceLinkService;
+    private final PlayerProfileService playerProfileService;
+    private final MhrGameLookupService mhrGameLookupService;
 
     /** (source, player_id) -> display name + whether it's the signed-in user. */
     private record PlayerMeta(String name, boolean isMe) {}
 
-    public FollowController(JwtUtil jwtUtil, UserRepository userRepository, JdbcTemplate jdbcTemplate) {
+    public FollowController(JwtUtil jwtUtil, UserRepository userRepository, JdbcTemplate jdbcTemplate,
+                            PlayerSourceLinkService playerSourceLinkService,
+                            PlayerProfileService playerProfileService,
+                            MhrGameLookupService mhrGameLookupService) {
         this.jwtUtil = jwtUtil;
         this.userRepository = userRepository;
         this.jdbcTemplate = jdbcTemplate;
+        this.playerSourceLinkService = playerSourceLinkService;
+        this.playerProfileService = playerProfileService;
+        this.mhrGameLookupService = mhrGameLookupService;
     }
 
     private Optional<User> resolveUser(String authHeader) {
@@ -257,33 +271,40 @@ public class FollowController {
     }
 
     /**
-     * GET /api/follows/activity — merged recent games (mine + followed players),
-     * newest first, with a freshness timestamp (asOf = last scrape across the
-     * involved players' game tables).
+     * The account's own player profiles: only the selected one when a player is
+     * given, otherwise every profile the login is linked to.
+     */
+    private List<PlayerProfile> ownPlayers(long uid, Long playerId) {
+        if (playerId != null) {
+            return playerProfileService.getProfileById(playerId).map(p -> List.of(p)).orElse(List.of());
+        }
+        return playerProfileService.listPlayersForUser(uid);
+    }
+
+    /**
+     * GET /api/follows/activity — merged recent games (the selected player +
+     * followed players), newest first, with a freshness timestamp (asOf = last
+     * scrape across the involved players' game tables). Pass ?playerId= to scope
+     * "my" games to one player on the account; follows are always account-level.
      */
     @GetMapping("/activity")
     public ResponseEntity<?> activity(@RequestParam(defaultValue = "30") int limit,
+                                      @RequestParam(value = "playerId", required = false) Long playerId,
                                       @RequestHeader(value = "Authorization", required = false) String authHeader) {
         Optional<User> user = resolveUser(authHeader);
         if (user.isEmpty()) {
             return ResponseEntity.status(401).body(Map.of("error", "Authentication required"));
         }
         long uid = user.get().getId();
+        if (playerId != null && !playerProfileService.isLinked(uid, playerId)) {
+            return ResponseEntity.status(403).body(Map.of("error", "This player is not on your account"));
+        }
 
-        // Involved players per source: my confirmed identity links + follows.
+        // Involved players per source: the selected player's links + follows.
         Map<String, Map<String, PlayerMeta>> players = new HashMap<>();
-        List<Map<String, Object>> myLinks = jdbcTemplate.query(
-            "SELECT source, source_player_id FROM player_identity_map " +
-            "WHERE user_id = ? AND link_state = 'CONFIRMED'",
-            (rs, rn) -> {
-                Map<String, Object> m = new HashMap<>();
-                m.put("source", rs.getString("source"));
-                m.put("id", rs.getString("source_player_id"));
-                return m;
-            }, uid);
-        for (Map<String, Object> l : myLinks) {
-            players.computeIfAbsent((String) l.get("source"), k -> new HashMap<>())
-                   .put((String) l.get("id"), new PlayerMeta("You", true));
+        for (PlayerSourceLinkService.PlayerLink link : playerSourceLinkService.resolve(uid, playerId)) {
+            players.computeIfAbsent(link.source(), k -> new HashMap<>())
+                   .put(link.sourcePlayerId(), new PlayerMeta("You", true));
         }
         List<Map<String, Object>> follows = jdbcTemplate.query(
             "SELECT source, source_player_id, player_name FROM follows WHERE user_id = ?",
@@ -340,6 +361,33 @@ public class FollowController {
             }
         }
 
+        // MHR games are not reachable through player_source_links — they are
+        // resolved per player profile (id, or name for rows scraped before a merge).
+        for (PlayerProfile player : ownPlayers(uid, playerId)) {
+            List<MhrGameLookupService.MhrGame> mhrGames =
+                mhrGameLookupService.recentGames(player.getId(), player.getFullName(), 30);
+            for (MhrGameLookupService.MhrGame g : mhrGames) {
+                Map<String, Object> m = new HashMap<>();
+                m.put("source", "MHR");
+                m.put("playerName", player.getFullName());
+                m.put("isMe", true);
+                m.put("date", g.date() == null ? null : g.date().toString());
+                m.put("teamFor", g.teamFor());
+                m.put("opponent", g.opponent());
+                // MHR publishes no per-player stats, so these stay null until a
+                // manual override exists; the feed renders them as "—".
+                m.put("goals", g.goals());
+                m.put("assists", g.assists());
+                m.put("points", g.points());
+                m.put("pim", g.pim());
+                entries.add(m);
+            }
+            Instant scraped = mhrGameLookupService.lastScrapedAt(player.getId(), player.getFullName());
+            if (scraped != null && (asOf == null || scraped.isAfter(asOf.toInstant()))) {
+                asOf = Timestamp.from(scraped);
+            }
+        }
+
         entries.sort((a, b) -> {
             String da = (String) a.get("date");
             String db = (String) b.get("date");
@@ -350,10 +398,10 @@ public class FollowController {
         });
         int cap = Math.max(0, Math.min(limit, entries.size()));
 
-        return ResponseEntity.ok(Map.of(
-            "entries", entries.subList(0, cap),
-            "asOf", asOf == null ? null : asOf.toInstant().toString()
-        ));
+        Map<String, Object> response = new HashMap<>();
+        response.put("entries", entries.subList(0, cap));
+        response.put("asOf", asOf == null ? null : asOf.toInstant().toString());
+        return ResponseEntity.ok(response);
     }
 
     // ─── enrichment: latest season totals + last 5 games per source ──────────

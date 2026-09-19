@@ -136,7 +136,11 @@ public final class IntegrationDtos {
             Integer goals,
             Integer assists,
             Integer points,
-            Integer pim
+            Integer pim,
+            Integer scoreFor,
+            Integer scoreAgainst,
+            /** True when a human entered/corrected this row's stats by hand. */
+            Boolean statsEdited
     ) {
     }
 

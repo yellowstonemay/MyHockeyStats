@@ -19,22 +19,24 @@ import java.util.Map;
 public class RankingLookupService {
 
     private final JdbcTemplate jdbcTemplate;
+    private final PlayerSourceLinkService playerSourceLinkService;
 
-    public RankingLookupService(JdbcTemplate jdbcTemplate) {
+    public RankingLookupService(JdbcTemplate jdbcTemplate,
+                                PlayerSourceLinkService playerSourceLinkService) {
         this.jdbcTemplate = jdbcTemplate;
+        this.playerSourceLinkService = playerSourceLinkService;
     }
 
-    /** All rankings for every confirmed identity link of a user. */
+    /** All rankings for every confirmed identity link of a login. */
     public List<Map<String, Object>> forUser(long userId) {
-        List<Map<String, Object>> links = jdbcTemplate.queryForList(
-            "SELECT source, source_player_id FROM player_identity_map " +
-            "WHERE user_id = ? AND link_state = 'CONFIRMED'", userId);
+        return forUser(userId, null);
+    }
+
+    /** Rankings for one player, or for every player of the login when none is given. */
+    public List<Map<String, Object>> forUser(long userId, Long playerId) {
         List<Map<String, Object>> all = new ArrayList<>();
-        for (Map<String, Object> link : links) {
-            String source = (String) link.get("source");
-            String playerId = (String) link.get("source_player_id");
-            if (source == null || playerId == null) continue;
-            all.addAll(computeRankings(source, playerId));
+        for (PlayerSourceLinkService.PlayerLink link : playerSourceLinkService.resolve(userId, playerId)) {
+            all.addAll(computeRankings(link.source(), link.sourcePlayerId()));
         }
         return all;
     }

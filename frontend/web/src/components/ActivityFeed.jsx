@@ -8,6 +8,7 @@ const SOURCE_META = {
   THF: { label: 'THF', color: 'bg-sky-100 text-sky-700' },
   AHF: { label: 'AHF', color: 'bg-emerald-100 text-emerald-700' },
   NJHS: { label: 'NJ HS', color: 'bg-amber-100 text-amber-700' },
+  MHR: { label: 'MHR', color: 'bg-rose-100 text-rose-700' },
 }
 
 function timeAgo(iso) {
@@ -32,7 +33,7 @@ function highlightOf(g) {
   return { label: 'Played', color: 'bg-slate-100 text-slate-500', dot: 'bg-slate-400' }
 }
 
-export default function ActivityFeed() {
+export default function ActivityFeed({ playerId }) {
   const [entries, setEntries] = useState([])
   const [asOf, setAsOf] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -42,7 +43,7 @@ export default function ActivityFeed() {
     setLoading(true)
     setError('')
     try {
-      const resp = await integrationsApi.fetchActivity(10)
+      const resp = await integrationsApi.fetchActivity(10, playerId)
       setEntries(resp.entries || [])
       setAsOf(resp.asOf || null)
     } catch (err) {
@@ -55,7 +56,7 @@ export default function ActivityFeed() {
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [playerId])
 
   return (
     <Card>

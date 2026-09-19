@@ -48,7 +48,7 @@ echo ""
 # STEP 1 — AYHL Career Stats (daily)
 # ============================================================================
 echo "─────────────────────────────────────────────────────────────────────────"
-echo "  [1/5] AYHL — Daily career stats update"
+echo "  [1/6] AYHL — Daily career stats update"
 echo "─────────────────────────────────────────────────────────────────────────"
 cd "$PROJECT_DIR"
 $PYTHON scripts/ayhl/daily_update.py $SEASON $DRY_RUN 2>&1 | tee -a "$LOG_DIR/ayhl-daily.log"
@@ -58,7 +58,7 @@ echo ""
 # STEP 2 — AYHL Per-Game Stats (daily)
 # ============================================================================
 echo "─────────────────────────────────────────────────────────────────────────"
-echo "  [2/5] AYHL — Per-game stats scrape"
+echo "  [2/6] AYHL — Per-game stats scrape"
 echo "─────────────────────────────────────────────────────────────────────────"
 $PYTHON scripts/ayhl/scrape_player_games.py $SEASON $DRY_RUN 2>&1 | tee -a "$LOG_DIR/ayhl-games.log"
 echo ""
@@ -67,7 +67,7 @@ echo ""
 # STEP 3 — THF Rosters (daily)
 # ============================================================================
 echo "─────────────────────────────────────────────────────────────────────────"
-echo "  [3/5] THF — Scrape rosters"
+echo "  [3/6] THF — Scrape rosters"
 echo "─────────────────────────────────────────────────────────────────────────"
 cd "$SCRIPT_DIR/thf-js"
 $NODE scrape_rosters.js 2>&1 | tee -a "$LOG_DIR/thf-rosters.log"
@@ -77,7 +77,7 @@ echo ""
 # STEP 4 — THF Career from Rosters (daily)
 # ============================================================================
 echo "─────────────────────────────────────────────────────────────────────────"
-echo "  [4/5] THF — Upsert career from roster CSV"
+echo "  [4/6] THF — Upsert career from roster CSV"
 echo "─────────────────────────────────────────────────────────────────────────"
 $NODE upsert_career_from_roster_csv.js 2>&1 | tee -a "$LOG_DIR/thf-career.log"
 echo ""
@@ -86,7 +86,7 @@ echo ""
 # STEP 5 — Gamesheet Stats (daily, only if CSV files exist)
 # ============================================================================
 echo "─────────────────────────────────────────────────────────────────────────"
-echo "  [5/5] Gamesheet — Fetch and load career stats"
+echo "  [5/6] Gamesheet — Fetch and load career stats"
 echo "─────────────────────────────────────────────────────────────────────────"
 cd "$SCRIPT_DIR/gamesheet"
 if [ -f "6579_players.csv" ] && [ -f "6579_players_stats.csv" ]; then
@@ -94,6 +94,21 @@ if [ -f "6579_players.csv" ] && [ -f "6579_players_stats.csv" ]; then
 else
     echo "  ⚠  Gamesheet CSV files not found — skipping (run fetch_player_career_stats.py first)"
 fi
+echo ""
+
+# ============================================================================
+# STEP 6 — MYHockeyRankings non-league games (daily)
+# Runs after the AYHL career scrape: team resolution needs the current-season
+# career rows to know which club each player is on.
+# ============================================================================
+echo "─────────────────────────────────────────────────────────────────────────"
+echo "  [6/6] MHR — Resolve teams + import non-league games"
+echo "─────────────────────────────────────────────────────────────────────────"
+cd "$PROJECT_DIR"
+$PYTHON scripts/mhr/mhr_resolve.py $SEASON $DRY_RUN 2>&1 | tee -a "$LOG_DIR/mhr-resolve.log" \
+    || echo "  ⚠  MHR resolve failed — continuing (see $LOG_DIR/mhr-resolve.log)"
+$PYTHON scripts/mhr/mhr_ingest.py $SEASON $DRY_RUN 2>&1 | tee -a "$LOG_DIR/mhr-ingest.log" \
+    || echo "  ⚠  MHR ingest failed — continuing (see $LOG_DIR/mhr-ingest.log)"
 echo ""
 
 # ============================================================================

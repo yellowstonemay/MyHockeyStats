@@ -9,6 +9,7 @@ import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -22,10 +23,22 @@ public class GameHistoryLookupService {
         "AYHL", "ayhl_player_games",
         "THF", "thf_player_games",
         "AHF", "ahf_player_games",
-        "NJHS", "njhs_player_games"
+        "NJHS", "njhs_player_games",
+        "MHR", "mhr_player_games"
     );
 
+    /** Only the MHR table carries team scores; other sources expose per-player stats. */
+    private static final Set<String> SCORE_SOURCES = Set.of("MHR");
+
+    /** Whether a source key is one this lookup can read. */
+    public static boolean isKnownSource(String source) {
+        return source != null && SOURCE_TABLES.containsKey(source.trim().toUpperCase(Locale.ROOT));
+    }
+
     private final JdbcTemplate jdbcTemplate;
+
+    /** Cached "does the override table exist" answer (null = not checked yet). */
+    private Boolean overrideTableAvailable;
 
     public GameHistoryLookupService(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
@@ -38,6 +51,7 @@ public class GameHistoryLookupService {
     ) {
         Set<String> canonicalNames = buildCanonicalLookupKeys(playerName);
         List<IntegrationDtos.GameHistoryGameDto> allGames = new ArrayList<>();
+        Long overridePlayerId = parseProfileId(playerId);
 
         for (Map.Entry<String, String> entry : SOURCE_TABLES.entrySet()) {
             String source = entry.getKey();
@@ -45,7 +59,7 @@ public class GameHistoryLookupService {
             if (!tableExists(tableName) || canonicalNames.isEmpty()) {
                 continue;
             }
-            allGames.addAll(loadGamesForSource(source, tableName, canonicalNames));
+            allGames.addAll(loadGamesForSource(source, tableName, canonicalNames, overridePlayerId));
         }
 
         List<IntegrationDtos.GameHistorySeasonOptionDto> seasonOptions = allGames.stream()
@@ -97,20 +111,56 @@ public class GameHistoryLookupService {
     private List<IntegrationDtos.GameHistoryGameDto> loadGamesForSource(
         String source,
         String tableName,
-        Collection<String> canonicalNames
+        Collection<String> canonicalNames,
+        Long overridePlayerId
     ) {
         String placeholders = canonicalNames.stream().map(x -> "?").collect(Collectors.joining(","));
-        String sql = "SELECT season_year, season_label, game_id, game_date, game_type, league, team_for, team_against, goals, assists, points, pim "
-            + "FROM " + tableName + " "
-            + "WHERE LOWER(REGEXP_REPLACE(COALESCE(player_name, ''), '[[:space:],.''-]', '', 'g')) IN (" + placeholders + ")";
+        boolean hasScores = SCORE_SOURCES.contains(source);
+        boolean hasOverrides = overridePlayerId != null && overrideTableAvailable();
 
-        List<String> params = canonicalNames.stream().toList();
+        String scoreColumns = hasScores
+            ? ", t.score_for, t.score_against"
+            : ", NULL AS score_for, NULL AS score_against";
+        String overrideJoin = hasOverrides
+            ? " LEFT JOIN game_stat_overrides o ON o.player_profile_id = ? AND o.source = ?"
+                + " AND o.season_year = t.season_year AND o.game_id = t.game_id"
+            : "";
+        String editedColumn = hasOverrides ? ", (o.id IS NOT NULL) AS stats_edited" : ", false AS stats_edited";
+        // A manual entry wins over the scraped value; either one may be null.
+        String goalsColumn = hasOverrides ? "COALESCE(o.goals, t.goals)" : "t.goals";
+        String assistsColumn = hasOverrides ? "COALESCE(o.assists, t.assists)" : "t.assists";
+        String pimColumn = hasOverrides ? "COALESCE(o.pim, t.pim)" : "t.pim";
+
+        String sql = "SELECT t.season_year, t.season_label, t.game_id, t.game_date, t.game_type, t.league,"
+            + " t.team_for, t.team_against,"
+            + " " + goalsColumn + " AS goals, " + assistsColumn + " AS assists, t.points AS scraped_points,"
+            + " " + pimColumn + " AS pim"
+            + scoreColumns + editedColumn + " "
+            + "FROM " + tableName + " t" + overrideJoin + " "
+            + "WHERE LOWER(REGEXP_REPLACE(COALESCE(t.player_name, ''), '[[:space:],.''-]', '', 'g')) IN (" + placeholders + ")";
+
+        List<Object> params = new ArrayList<>();
+        if (hasOverrides) {
+            params.add(overridePlayerId);
+            params.add(source);
+        }
+        params.addAll(canonicalNames);
+
         return jdbcTemplate.query(sql, ps -> {
             for (int i = 0; i < params.size(); i++) {
-                ps.setString(i + 1, params.get(i));
+                ps.setObject(i + 1, params.get(i));
             }
         }, (rs, rowNum) -> {
             Date date = rs.getDate("game_date");
+            Integer goals = (Integer) rs.getObject("goals");
+            Integer assists = (Integer) rs.getObject("assists");
+            boolean edited = rs.getBoolean("stats_edited");
+            // Points are only stored by the source tables; recompute them when a
+            // human replaced the goals/assists of this game.
+            Integer points = (Integer) rs.getObject("scraped_points");
+            if (edited && (goals != null || assists != null)) {
+                points = (goals == null ? 0 : goals) + (assists == null ? 0 : assists);
+            }
             return new IntegrationDtos.GameHistoryGameDto(
                 source,
                 (Integer) rs.getObject("season_year"),
@@ -121,10 +171,13 @@ public class GameHistoryLookupService {
                 rs.getString("league"),
                 rs.getString("team_for"),
                 rs.getString("team_against"),
-                (Integer) rs.getObject("goals"),
-                (Integer) rs.getObject("assists"),
-                (Integer) rs.getObject("points"),
-                (Integer) rs.getObject("pim")
+                goals,
+                assists,
+                points,
+                (Integer) rs.getObject("pim"),
+                (Integer) rs.getObject("score_for"),
+                (Integer) rs.getObject("score_against"),
+                edited
             );
         });
     }
@@ -136,6 +189,25 @@ public class GameHistoryLookupService {
             tableName
         );
         return exists != null && exists > 0;
+    }
+
+    private boolean overrideTableAvailable() {
+        if (overrideTableAvailable == null) {
+            overrideTableAvailable = tableExists("game_stat_overrides");
+        }
+        return overrideTableAvailable;
+    }
+
+    /** The player id used by game history is the numeric player profile id. */
+    private static Long parseProfileId(String playerId) {
+        if (playerId == null || playerId.isBlank()) {
+            return null;
+        }
+        try {
+            return Long.parseLong(playerId.trim());
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     private static String normalizePlayerName(String fullName) {

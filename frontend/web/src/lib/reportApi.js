@@ -2,22 +2,26 @@ import { api } from './utils'
 
 export const reportApi = {
   // Feature 1: unified player report (free for every user)
-  fetchMyReport() {
-    return api.fetchWithAuth('/players/me/report')
+  fetchMyReport(playerId) {
+    const qs = playerId ? `?playerId=${encodeURIComponent(playerId)}` : ''
+    return api.fetchWithAuth(`/players/me/report${qs}`)
   },
 
   // Feature 2: cached AI season report for a season
-  fetchInsights(season) {
-    const qs = season ? `?season=${encodeURIComponent(season)}` : ''
+  fetchInsights(season, playerId) {
+    const params = new URLSearchParams()
+    if (season) params.set('season', season)
+    if (playerId) params.set('playerId', playerId)
+    const qs = params.toString() ? `?${params.toString()}` : ''
     return api.fetchWithAuth(`/players/me/report/insights${qs}`)
   },
 
   // Feature 2: generate the AI season report (weekly/daily cost-capped)
-  generateInsights(season) {
+  generateInsights(season, playerId) {
     return api.fetchWithAuth('/players/me/report/insights', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ season }),
+      body: JSON.stringify({ season, playerId: playerId || null }),
     })
   },
 }

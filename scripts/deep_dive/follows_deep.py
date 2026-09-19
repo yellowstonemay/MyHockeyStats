@@ -52,6 +52,19 @@ def main() -> None:
             elif source == "NJHS":
                 cmd = [PYTHON, os.path.join(SCRIPT_DIR, "njhs_deep.py"),
                        "--player-slug", str(spid)]
+            elif source == "EP":
+                # EP careers aren't in AYHL/THF/AHF/NJHS data — refresh via
+                # ep_lookup (Elite Prospects GraphQL API), reusing the same DB
+                # connection so the upsert commits atomically below.
+                try:
+                    from ep_lookup import refresh_career
+                    n = refresh_career(conn, str(spid))
+                    conn.commit()
+                    print(f">>> EP refresh {spid}: {n} season(s)", flush=True)
+                except Exception as e:  # noqa: BLE001
+                    conn.rollback()
+                    print(f"[follows_deep] EP:{spid} failed: {e}", flush=True)
+                continue
             else:  # THF / AHF
                 cmd = [PYTHON, os.path.join(SCRIPT_DIR, "thf_ahf_deep.py"),
                        "--player-id", str(spid), "--source", source]

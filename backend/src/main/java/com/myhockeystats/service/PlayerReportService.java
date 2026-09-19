@@ -1,5 +1,7 @@
 package com.myhockeystats.service;
 
+import com.myhockeystats.model.PlayerProfile;
+import com.myhockeystats.service.integration.MhrGameLookupService;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
@@ -16,7 +18,9 @@ import java.util.regex.Pattern;
 /**
  * Unified player report — merges every confirmed identity link
  * (AYHL/THF/AHF/NJHS) into one career view with season groups, totals,
- * per-league split, rankings and recent games.
+ * per-league split, rankings and recent games. MHR games carry no per-player
+ * career stats, so they only contribute to the recent-games list (they are
+ * resolved by player profile instead of a source link).
  *
  * Feature 1 = free for every user (pure local data + SQL, no AI call).
  */
@@ -43,30 +47,56 @@ public class PlayerReportService {
 
     private final JdbcTemplate jdbcTemplate;
     private final RankingLookupService rankingLookupService;
+    private final PlayerSourceLinkService playerSourceLinkService;
+    private final PlayerProfileService playerProfileService;
+    private final MhrGameLookupService mhrGameLookupService;
 
-    public PlayerReportService(JdbcTemplate jdbcTemplate, RankingLookupService rankingLookupService) {
+    public PlayerReportService(JdbcTemplate jdbcTemplate, RankingLookupService rankingLookupService,
+                               PlayerSourceLinkService playerSourceLinkService,
+                               PlayerProfileService playerProfileService,
+                               MhrGameLookupService mhrGameLookupService) {
         this.jdbcTemplate = jdbcTemplate;
         this.rankingLookupService = rankingLookupService;
+        this.playerSourceLinkService = playerSourceLinkService;
+        this.playerProfileService = playerProfileService;
+        this.mhrGameLookupService = mhrGameLookupService;
     }
 
     /** Normalized career row (one source/league/season). */
     public record CareerRow(int seasonYear, String source, String league, String team,
                             Integer games, Integer goals, Integer assists, Integer points, Integer pim) {}
 
-    /** Confirmed identity links for a user: source + source_player_id. */
+    /**
+     * Confirmed source links for a player, or for every player of the login
+     * when no player is given. Links live on the player (they are shared
+     * between logins), so this is what makes a report player-scoped.
+     */
+    public List<Map<String, Object>> links(long userId, Long playerId) {
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (PlayerSourceLinkService.PlayerLink link : playerSourceLinkService.resolve(userId, playerId)) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("source", link.source());
+            row.put("source_player_id", link.sourcePlayerId());
+            out.add(row);
+        }
+        return out;
+    }
+
     public List<Map<String, Object>> links(long userId) {
-        return jdbcTemplate.queryForList(
-            "SELECT source, source_player_id FROM player_identity_map " +
-            "WHERE user_id = ? AND link_state = 'CONFIRMED'", userId);
+        return links(userId, null);
     }
 
     /** Load + normalize every career row across the user's confirmed links. */
     public List<CareerRow> careerRows(long userId) {
+        return careerRows(userId, null);
+    }
+
+    public List<CareerRow> careerRows(long userId, Long playerId) {
         List<CareerRow> out = new ArrayList<>();
-        for (Map<String, Object> link : links(userId)) {
+        for (Map<String, Object> link : links(userId, playerId)) {
             String source = (String) link.get("source");
-            String playerId = (String) link.get("source_player_id");
-            if (source == null || playerId == null) continue;
+            String sourcePlayerId = (String) link.get("source_player_id");
+            if (source == null || sourcePlayerId == null) continue;
             String[] meta = CAREER.get(source);
             if (meta == null) continue;
             boolean hasPim = meta[1].equals("1");
@@ -89,7 +119,7 @@ public class PlayerReportService {
                         pim
                     ));
                     return null;
-                }, playerId);
+                }, sourcePlayerId);
             } catch (Exception e) {
                 // source table may not exist / no rows; skip
             }
@@ -99,10 +129,15 @@ public class PlayerReportService {
 
     /** Build the full unified report for a user. */
     public Map<String, Object> buildReport(long userId) {
-        Map<String, Object> report = new LinkedHashMap<>();
-        report.put("profile", profile(userId));
+        return buildReport(userId, null);
+    }
 
-        List<CareerRow> career = careerRows(userId);
+    /** Build the unified report for one player (or the whole login when none is given). */
+    public Map<String, Object> buildReport(long userId, Long playerId) {
+        Map<String, Object> report = new LinkedHashMap<>();
+        report.put("profile", profile(userId, playerId));
+
+        List<CareerRow> career = careerRows(userId, playerId);
 
         // Totals across all sources.
         Map<String, Object> totals = new LinkedHashMap<>();
@@ -173,10 +208,10 @@ public class PlayerReportService {
         report.put("byLeague", leagueList);
 
         // Rankings (team + league percentiles) per season.
-        report.put("rankings", rankingLookupService.forUser(userId));
+        report.put("rankings", rankingLookupService.forUser(userId, playerId));
 
         // Recent games (last 10 across sources).
-        report.put("recentGames", recentGames(userId, 10));
+        report.put("recentGames", recentGames(userId, 10, playerId));
 
         // Available seasons for the AI selector.
         List<Integer> avail = new ArrayList<>(years);
@@ -189,8 +224,12 @@ public class PlayerReportService {
 
     /** Season-scoped numeric summary used to build the AI prompt. */
     public Map<String, Object> seasonSummary(long userId, int seasonYear) {
+        return seasonSummary(userId, seasonYear, null);
+    }
+
+    public Map<String, Object> seasonSummary(long userId, int seasonYear, Long playerId) {
         Map<String, Object> out = new LinkedHashMap<>();
-        List<CareerRow> career = careerRows(userId);
+        List<CareerRow> career = careerRows(userId, playerId);
         List<CareerRow> thisSeason = new ArrayList<>();
         List<CareerRow> prevSeason = new ArrayList<>();
         for (CareerRow r : career) {
@@ -213,10 +252,10 @@ public class PlayerReportService {
 
         // Rankings for this season.
         List<Map<String, Object>> rankings = new ArrayList<>();
-        for (Map<String, Object> link : links(userId)) {
+        for (Map<String, Object> link : links(userId, playerId)) {
             String source = (String) link.get("source");
-            String playerId = (String) link.get("source_player_id");
-            for (Map<String, Object> r : rankingLookupService.computeRankings(source, playerId)) {
+            String sourcePlayerId = (String) link.get("source_player_id");
+            for (Map<String, Object> r : rankingLookupService.computeRankings(source, sourcePlayerId)) {
                 if (String.valueOf(r.get("season")).startsWith(String.valueOf(seasonYear))) {
                     rankings.add(r);
                 }
@@ -237,10 +276,20 @@ public class PlayerReportService {
         return m;
     }
 
-    private Map<String, Object> profile(long userId) {
+    private Map<String, Object> profile(long userId, Long playerId) {
         Map<String, Object> out = new LinkedHashMap<>();
         try {
-            jdbcTemplate.query("SELECT full_name, birthdate, position, location FROM player_profiles WHERE user_id = ?",
+            // A login can own several players; without an explicit selection the
+            // report is built for its primary (default) player.
+            String sql = playerId == null
+                ? "SELECT pp.full_name, pp.birthdate, pp.position, pp.location " +
+                  "FROM player_profiles pp " +
+                  "JOIN user_players up ON up.player_id = pp.id " +
+                  "WHERE up.user_id = ? " +
+                  "ORDER BY up.is_primary DESC, up.created_at ASC LIMIT 1"
+                : "SELECT pp.full_name, pp.birthdate, pp.position, pp.location " +
+                  "FROM player_profiles pp WHERE pp.id = ?";
+            jdbcTemplate.query(sql,
                 (rs, rn) -> {
                     out.put("fullName", rs.getString("full_name"));
                     out.put("position", rs.getString("position"));
@@ -249,18 +298,18 @@ public class PlayerReportService {
                     out.put("birthdate", bd == null ? null : bd.toString());
                     out.put("age", bd == null ? null : LocalDate.now().getYear() - bd.getYear());
                     return null;
-                }, userId);
+                }, playerId == null ? userId : playerId);
         } catch (Exception e) {
             // no profile
         }
         return out;
     }
 
-    private List<Map<String, Object>> recentGames(long userId, int limit) {
+    private List<Map<String, Object>> recentGames(long userId, int limit, Long playerId) {
         List<Map<String, Object>> entries = new ArrayList<>();
-        for (Map<String, Object> link : links(userId)) {
+        for (Map<String, Object> link : links(userId, playerId)) {
             String source = (String) link.get("source");
-            String playerId = (String) link.get("source_player_id");
+            String sourcePlayerId = (String) link.get("source_player_id");
             String table = GAMES.get(source);
             if (table == null) continue;
             try {
@@ -277,12 +326,29 @@ public class PlayerReportService {
                         m.put("assists", rs.getObject("assists") == null ? 0 : ((Number) rs.getObject("assists")).intValue());
                         m.put("points", rs.getObject("points") == null ? 0 : ((Number) rs.getObject("points")).intValue());
                         return m;
-                    }, playerId);
+                    }, sourcePlayerId);
                 entries.addAll(rows);
             } catch (Exception e) {
                 // games table may not exist yet
             }
         }
+
+        // MHR games have no source link — they are matched on the player profile.
+        for (PlayerProfile player : involvedPlayers(userId, playerId)) {
+            for (MhrGameLookupService.MhrGame g : mhrGameLookupService.recentGames(
+                    player.getId(), player.getFullName(), limit)) {
+                Map<String, Object> m = new LinkedHashMap<>();
+                m.put("source", "MHR");
+                m.put("date", g.date() == null ? null : g.date().toString());
+                m.put("teamFor", g.teamFor());
+                m.put("opponent", g.opponent());
+                m.put("goals", nz(g.goals()));
+                m.put("assists", nz(g.assists()));
+                m.put("points", nz(g.points()));
+                entries.add(m);
+            }
+        }
+
         entries.sort((a, b) -> {
             String da = (String) a.get("date"), db = (String) b.get("date");
             if (da == null && db == null) return 0;
@@ -291,6 +357,17 @@ public class PlayerReportService {
             return db.compareTo(da);
         });
         return entries.size() > limit ? entries.subList(0, limit) : entries;
+    }
+
+    /**
+     * Profiles whose games belong in this report: the selected player, or every
+     * profile of the login when none is selected.
+     */
+    private List<PlayerProfile> involvedPlayers(long userId, Long playerId) {
+        if (playerId != null) {
+            return playerProfileService.getProfileById(playerId).map(p -> List.of(p)).orElse(List.of());
+        }
+        return playerProfileService.listPlayersForUser(userId);
     }
 
     private static int seasonStartYear(String label) {

@@ -43,8 +43,11 @@ export const integrationsApi = {
   },
 
   // New simplified seasons API for currently authenticated player
-  fetchMySeasons(season) {
-    const query = season ? `?season=${encodeURIComponent(season)}` : ''
+  fetchMySeasons(season, playerId) {
+    const params = new URLSearchParams()
+    if (season) params.set('season', season)
+    if (playerId) params.set('playerId', playerId)
+    const query = params.toString() ? `?${params.toString()}` : ''
     return api.fetchWithAuth(`/players/me/seasons${query}`)
   },
 
@@ -83,9 +86,10 @@ export const integrationsApi = {
     })
   },
 
-  // Team / league rankings per season for the current player
-  fetchRankings() {
-    return api.fetchWithAuth('/rankings')
+  // Team / league rankings per season for a player on this account
+  fetchRankings(playerId) {
+    const qs = playerId ? `?playerId=${encodeURIComponent(playerId)}` : ''
+    return api.fetchWithAuth(`/rankings${qs}`)
   },
 
   // Current user's own player profile
@@ -98,6 +102,105 @@ export const integrationsApi = {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
+    })
+  },
+
+  // ── Players on this account (1 login -> many players) ─────────────────────
+  fetchMyPlayers() {
+    return api.fetchWithAuth('/players')
+  },
+
+  createPlayer(data) {
+    return api.fetchWithAuth('/players', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+  },
+
+  updatePlayer(playerId, data) {
+    return api.fetchWithAuth(`/players/${encodeURIComponent(playerId)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+  },
+
+  // Attach an EXISTING player to this login (many logins -> same player)
+  linkPlayer(playerId, relation) {
+    return api.fetchWithAuth('/players/link', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ playerId, relation }),
+    })
+  },
+
+  unlinkPlayer(playerId) {
+    return api.fetchWithAuth(`/players/${encodeURIComponent(playerId)}/link`, {
+      method: 'DELETE',
+    })
+  },
+
+  setPrimaryPlayer(playerId) {
+    return api.fetchWithAuth(`/players/${encodeURIComponent(playerId)}/primary`, {
+      method: 'POST',
+    })
+  },
+
+  // Refresh one player's stats (deduped per player across all logins)
+  requestPlayerDeepDive(playerId) {
+    return api.fetchWithAuth(`/players/${encodeURIComponent(playerId)}/deep-dive`, {
+      method: 'POST',
+    })
+  },
+
+  // Manual G/A/PIM for one game (needs edit rights on the player)
+  saveGameStats(playerId, game) {
+    return api.fetchWithAuth(`/players/${encodeURIComponent(playerId)}/game-stats`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(game),
+    })
+  },
+
+  // Drop the manual entry so the scraped value shows again
+  resetGameStats(playerId, game) {
+    return api.fetchWithAuth(`/players/${encodeURIComponent(playerId)}/game-stats/reset`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(game),
+    })
+  },
+
+  // Owner or admin: grant/revoke edit rights for a login attached to the player
+  setPlayerEditor(playerId, { email, userId, canEdit }) {
+    return api.fetchWithAuth(`/players/${encodeURIComponent(playerId)}/editors`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, userId, canEdit }),
+    })
+  },
+
+  // Admin: hand a player to another login
+  setPlayerOwner(playerId, { email, userId }) {
+    return api.fetchWithAuth(`/players/${encodeURIComponent(playerId)}/owner`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, userId }),
+    })
+  },
+
+  // Admin: every player profile with its owner and attached logins
+  fetchAdminProfiles() {
+    return api.fetchWithAuth('/admin/profiles')
+  },
+
+  // Admin: fold a duplicate profile into the surviving one, then delete it
+  mergePlayerProfile(sourceId, targetProfileId) {
+    return api.fetchWithAuth(`/admin/profiles/${encodeURIComponent(sourceId)}/merge`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetProfileId }),
     })
   },
 
@@ -114,8 +217,11 @@ export const integrationsApi = {
     return api.fetchWithAuth(`/rankings/team${qs}`)
   },
 
-  fetchMyGameHistory(seasonYear) {
-    const query = seasonYear ? `?seasonYear=${encodeURIComponent(seasonYear)}` : ''
+  fetchMyGameHistory(seasonYear, playerId) {
+    const params = new URLSearchParams()
+    if (seasonYear) params.set('seasonYear', seasonYear)
+    if (playerId) params.set('playerId', playerId)
+    const query = params.toString() ? `?${params.toString()}` : ''
     return api.fetchWithAuth(`/players/me/game-history${query}`)
   },
 
@@ -142,9 +248,12 @@ export const integrationsApi = {
     })
   },
 
-  // Merged recent-games feed (me + followed players) with freshness timestamp
-  fetchActivity(limit) {
-    const qs = limit ? `?limit=${limit}` : ''
+  // Merged recent-games feed (one player + followed players) with freshness timestamp
+  fetchActivity(limit, playerId) {
+    const params = new URLSearchParams()
+    if (limit) params.set('limit', limit)
+    if (playerId) params.set('playerId', playerId)
+    const qs = params.toString() ? `?${params.toString()}` : ''
     return api.fetchWithAuth(`/follows/activity${qs}`)
   },
 

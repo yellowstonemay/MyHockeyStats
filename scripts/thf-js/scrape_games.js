@@ -509,6 +509,37 @@ function fetchBufferWithRedirects(url, redirectsLeft = 5) {
     });
 }
 
+// ── scoresheet download throttling ──────────────────────────────────────
+// The scoresheet host (stats.blackbear.timetoscore.com) rate-limits bursts
+// (HTTP 429). Concurrent team scraping makes downloads overlap, so serialize
+// them with a small inter-request gap and retry 429/5xx with backoff.
+let _downloadChain = Promise.resolve();
+let _lastDownloadAt = 0;
+const DOWNLOAD_GAP_MS = 1200;
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function throttledFetch(link) {
+    const attempt = _downloadChain.then(async () => {
+        const wait = Math.max(0, _lastDownloadAt + DOWNLOAD_GAP_MS - Date.now());
+        if (wait) await sleep(wait);
+        _lastDownloadAt = Date.now();
+        let buffer;
+        for (let retry = 0; retry < 6; retry++) {
+            try {
+                buffer = await fetchBufferWithRedirects(link);
+                break;
+            } catch (err) {
+                const msg = String((err && err.message) || '');
+                if (!/429|5\d\d/.test(msg) || retry === 5) throw err;
+                await sleep(2000 * (retry + 1)); // 2s, 4s, 6s, 8s, 10s backoff
+            }
+        }
+        return buffer;
+    });
+    _downloadChain = attempt.catch(() => {});
+    return attempt;
+}
+
 async function downloadScoresheetPdf(link, outputPath) {
     if (!link) {
         return false;
@@ -518,7 +549,7 @@ async function downloadScoresheetPdf(link, outputPath) {
         return true;
     }
 
-    const buffer = await fetchBufferWithRedirects(link);
+    const buffer = await throttledFetch(link);
     if (!buffer || buffer.length === 0) {
         throw new Error(`Empty PDF download: ${link}`);
     }
@@ -675,14 +706,17 @@ async function scrapeGames(league, seasonYear, options = {}) {
         let timeoutFailedQueue = [];
         let hardFailedQueue = [];
 
-        async function processTeam(team, processOptions = {}) {
+        // Number of teams processed concurrently. Kept modest so we don't trip
+        // the source site's anti-bot / rate limiting.
+        const CONCURRENCY = 3;
+
+        async function processTeam(team, page, processOptions = {}) {
             const {
                 isRetry = false,
                 responseTimeoutMs = 60000,
                 pageTimeoutMs = 60000
             } = processOptions;
 
-            const page = await browser.newPage();
             console.log(`Scraping schedule: ${team.team_name} ${isRetry ? '(Retry)' : ''}`);
 
             try {
@@ -691,8 +725,7 @@ async function scrapeGames(league, seasonYear, options = {}) {
                     { timeout: responseTimeoutMs }
                 );
 
-                await new Promise((r) => setTimeout(r, 2000));
-                await page.goto(team.url, { waitUntil: 'networkidle0', timeout: pageTimeoutMs });
+                await page.goto(team.url, { waitUntil: 'domcontentloaded', timeout: pageTimeoutMs });
 
                 const response = await schedulePromise;
                 const data = await response.json();
@@ -773,26 +806,38 @@ async function scrapeGames(league, seasonYear, options = {}) {
                     });
                 }
                 return false;
-            } finally {
-                await page.close();
             }
         }
 
-        for (const team of queue) {
-            await processTeam(team);
+        // Open a small pool of reusable pages (avoids newPage() per team) and
+        // run one worker per page concurrently over the team queue.
+        const pages = [];
+        for (let i = 0; i < CONCURRENCY; i++) {
+            pages.push(await browser.newPage());
         }
+
+        async function runPool(teams, options) {
+            let idx = 0;
+            const worker = async (pi) => {
+                while (idx < teams.length) {
+                    const team = teams[idx++];
+                    await processTeam(team, pages[pi], options);
+                }
+            };
+            await Promise.all(pages.map((_, pi) => worker(pi)));
+        }
+
+        await runPool(queue);
 
         if (timeoutFailedQueue.length > 0) {
             console.log(`Retrying ${timeoutFailedQueue.length} timeout failure(s) with longer timeout...`);
         }
 
-        for (const team of timeoutFailedQueue) {
-            await processTeam(team, {
-                isRetry: true,
-                responseTimeoutMs: 120000,
-                pageTimeoutMs: 120000
-            });
-        }
+        await runPool(timeoutFailedQueue, {
+            isRetry: true,
+            responseTimeoutMs: 120000,
+            pageTimeoutMs: 120000
+        });
 
         if (hardFailedQueue.length > 0) {
             const failedLines = hardFailedQueue.map(

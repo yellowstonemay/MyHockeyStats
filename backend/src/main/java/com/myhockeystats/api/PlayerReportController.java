@@ -4,6 +4,7 @@ import com.myhockeystats.model.User;
 import com.myhockeystats.repository.UserRepository;
 import com.myhockeystats.security.JwtUtil;
 import com.myhockeystats.service.AiInsightService;
+import com.myhockeystats.service.PlayerProfileService;
 import com.myhockeystats.service.PlayerReportService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -29,14 +30,22 @@ public class PlayerReportController {
     private final UserRepository userRepository;
     private final PlayerReportService playerReportService;
     private final AiInsightService aiInsightService;
+    private final PlayerProfileService playerProfileService;
 
     public PlayerReportController(JwtUtil jwtUtil, UserRepository userRepository,
                                   PlayerReportService playerReportService,
-                                  AiInsightService aiInsightService) {
+                                  AiInsightService aiInsightService,
+                                  PlayerProfileService playerProfileService) {
         this.jwtUtil = jwtUtil;
         this.userRepository = userRepository;
         this.playerReportService = playerReportService;
         this.aiInsightService = aiInsightService;
+        this.playerProfileService = playerProfileService;
+    }
+
+    /** A player the caller may not view must never leak into a report. */
+    private boolean forbidden(long uid, Long playerId) {
+        return playerId != null && !playerProfileService.isLinked(uid, playerId);
     }
 
     private Optional<User> resolveUser(String authHeader) {
@@ -48,22 +57,29 @@ public class PlayerReportController {
         return userRepository.findByEmail(email);
     }
 
-    /** GET /api/players/me/report — unified report (free for everyone). */
+    /**
+     * GET /api/players/me/report — unified report (free for everyone).
+     * Pass ?playerId= to report on another player on the account.
+     */
     @GetMapping
-    public ResponseEntity<?> report(@RequestHeader(value = "Authorization", required = false) String authHeader) {
+    public ResponseEntity<?> report(@RequestParam(value = "playerId", required = false) Long playerId,
+                                    @RequestHeader(value = "Authorization", required = false) String authHeader) {
         Optional<User> user = resolveUser(authHeader);
         if (user.isEmpty()) {
             return ResponseEntity.status(401).body(Map.of("error", "Authentication required"));
         }
         long uid = user.get().getId();
+        if (forbidden(uid, playerId)) {
+            return ResponseEntity.status(403).body(Map.of("error", "This player is not on your account"));
+        }
 
-        Map<String, Object> report = playerReportService.buildReport(uid);
+        Map<String, Object> report = playerReportService.buildReport(uid, playerId);
 
         // Attach cached AI insights (if any) + AI status so the UI can render
         // the Season Insights section without an extra call.
-        Integer cachedSeason = aiInsightService.cachedSeason(uid);
+        Integer cachedSeason = aiInsightService.cachedSeason(uid, playerId);
         if (cachedSeason != null) {
-            List<Map<String, Object>> insights = aiInsightService.getCached(uid, cachedSeason);
+            List<Map<String, Object>> insights = aiInsightService.getCached(uid, cachedSeason, playerId);
             if (insights != null) {
                 report.put("insights", insights);
                 report.put("insightSeason", cachedSeason);
@@ -83,17 +99,21 @@ public class PlayerReportController {
     /** GET /api/players/me/report/insights?season=YYYY — cached AI report for a season. */
     @GetMapping("/insights")
     public ResponseEntity<?> cachedInsights(@RequestParam(required = false) Integer season,
+                                            @RequestParam(value = "playerId", required = false) Long playerId,
                                             @RequestHeader(value = "Authorization", required = false) String authHeader) {
         Optional<User> user = resolveUser(authHeader);
         if (user.isEmpty()) {
             return ResponseEntity.status(401).body(Map.of("error", "Authentication required"));
         }
         long uid = user.get().getId();
-        Integer s = season != null ? season : aiInsightService.cachedSeason(uid);
+        if (forbidden(uid, playerId)) {
+            return ResponseEntity.status(403).body(Map.of("error", "This player is not on your account"));
+        }
+        Integer s = season != null ? season : aiInsightService.cachedSeason(uid, playerId);
         if (s == null) {
             return ResponseEntity.ok(Map.of("status", "NOT_GENERATED"));
         }
-        List<Map<String, Object>> insights = aiInsightService.getCached(uid, s);
+        List<Map<String, Object>> insights = aiInsightService.getCached(uid, s, playerId);
         return ResponseEntity.ok(Map.of("status", insights == null ? "NOT_GENERATED" : "READY",
                 "season", s, "insights", insights == null ? List.of() : insights));
     }
@@ -108,10 +128,16 @@ public class PlayerReportController {
         }
         long uid = user.get().getId();
 
+        Long playerId = body == null || body.get("playerId") == null
+            ? null : ((Number) body.get("playerId")).longValue();
+        if (forbidden(uid, playerId)) {
+            return ResponseEntity.status(403).body(Map.of("error", "This player is not on your account"));
+        }
+
         Integer season = body == null || body.get("season") == null
             ? null : ((Number) body.get("season")).intValue();
         if (season == null) {
-            Map<String, Object> report = playerReportService.buildReport(uid);
+            Map<String, Object> report = playerReportService.buildReport(uid, playerId);
             Object latest = report.get("latestSeason");
             season = latest == null ? null : ((Number) latest).intValue();
         }
@@ -120,7 +146,7 @@ public class PlayerReportController {
         }
 
         try {
-            Map<String, Object> out = aiInsightService.generate(uid, season);
+            Map<String, Object> out = aiInsightService.generate(uid, season, playerId);
             return ResponseEntity.ok(out);
         } catch (AiInsightService.NotConfiguredException e) {
             return ResponseEntity.status(503).body(Map.of("error", "AI report is not configured yet.", "code", "AI_NOT_CONFIGURED"));

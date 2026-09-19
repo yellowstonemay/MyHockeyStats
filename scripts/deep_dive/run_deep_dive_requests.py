@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""Poll deep_dive_requests and run FULL (all-seasons) deep-dives for pending users.
+"""Poll deep_dive_requests and run FULL (all-seasons) deep-dives per PLAYER.
 
-The admin page enqueues a request via POST /api/admin/deep-dive/{userId}; this
-poller (run frequently via cron on the Mac mini) picks it up and runs the
-per-user full-career scrape for each of the user's identity links.
+Requests are keyed by player, not by login: a player can be attached to several
+logins (two parents, player + guardian, …), so a refresh runs ONCE per player
+and every attached login gets the resulting notification cleared.
+
+Sources come from player_source_links (player -> source_player_id), which is
+maintained by identity_link.py.
 
 Schedule (Mac mini cron — every 5 minutes):
     */5 * * * * ~/hockey-server/scripts/deep_dive/run_deep_dive_requests.py >> ~/hockey-server/logs/deep-dive-requests.log 2>&1
@@ -56,47 +59,70 @@ def run(cmd) -> int:
     return subprocess.run(cmd).returncode
 
 
+def resolve_player_id(cur, player_id, user_id):
+    """Legacy rows were queued per user; map them onto that login's player."""
+    if player_id is not None:
+        return player_id
+    if user_id is None:
+        return None
+    cur.execute(
+        "SELECT player_id FROM user_players WHERE user_id=%s "
+        "ORDER BY is_primary DESC, created_at ASC LIMIT 1", (user_id,))
+    row = cur.fetchone()
+    if row is None or row[0] is None:
+        return None
+    cur.execute("UPDATE deep_dive_requests SET player_id=%s WHERE user_id=%s AND player_id IS NULL",
+                (row[0], user_id))
+    return row[0]
+
+
 def main() -> None:
     if not acquire_lock():
-        print(f"[{datetime_now()}] Another deep-dive poller is already running; skipping this tick", flush=True)
+        print(f"[{datetime_now()}] Another deep-dive poller is already running; skipping this tick",
+              flush=True)
         return
     conn = get_conn()
     try:
         cur = conn.cursor()
         cur.execute(
-            "SELECT id, user_id FROM deep_dive_requests WHERE status='PENDING' ORDER BY requested_at")
+            "SELECT id, player_id, user_id FROM deep_dive_requests "
+            "WHERE status='PENDING' ORDER BY requested_at")
         pending = cur.fetchall()
         if not pending:
             return
         print(f"[{datetime_now()}] {len(pending)} pending deep-dive request(s)", flush=True)
-        # Auto-link new/updated users first so queued requests (e.g. from signup)
-        # actually have identity links to deep-dive.
+        # Auto-link players first so queued requests (e.g. from "add player")
+        # actually have source identities to deep-dive.
         run([PYTHON, os.path.join(SCRIPT_DIR, "identity_link.py")])
-        for req_id, user_id in pending:
+        for req_id, player_id, user_id in pending:
+            player_id = resolve_player_id(cur, player_id, user_id)
             cur.execute(
                 "UPDATE deep_dive_requests SET status='RUNNING', started_at=NOW() WHERE id=%s",
                 (req_id,))
             conn.commit()
             error = None
             try:
-                cur.execute(
-                    "SELECT source, source_player_id FROM player_identity_map "
-                    "WHERE user_id=%s AND link_state='CONFIRMED'", (user_id,))
-                links = cur.fetchall()
-                if not links:
-                    print(f"[{req_id}] user {user_id}: no identity links", flush=True)
-                for source, spid in links:
-                    if source == "AYHL":
-                        cmd = [PYTHON, os.path.join(SCRIPT_DIR, "ayhl_deep.py"),
-                               "--player-id", str(spid), "--all-seasons"]
-                    elif source == "NJHS":
-                        cmd = [PYTHON, os.path.join(SCRIPT_DIR, "njhs_deep.py"),
-                               "--player-slug", str(spid), "--all-seasons"]
-                    else:
-                        cmd = [PYTHON, os.path.join(SCRIPT_DIR, "thf_ahf_deep.py"),
-                               "--player-id", str(spid), "--all-seasons", "--source", source]
-                    if run(cmd) != 0:
-                        error = f"{source}:{spid} failed"
+                if player_id is None:
+                    error = "no player attached to this request"
+                else:
+                    cur.execute(
+                        "SELECT source, source_player_id FROM player_source_links "
+                        "WHERE player_id=%s AND link_state='CONFIRMED'", (player_id,))
+                    links = cur.fetchall()
+                    if not links:
+                        print(f"[{req_id}] player {player_id}: no identity links", flush=True)
+                    for source, spid in links:
+                        if source == "AYHL":
+                            cmd = [PYTHON, os.path.join(SCRIPT_DIR, "ayhl_deep.py"),
+                                   "--player-id", str(spid), "--all-seasons"]
+                        elif source == "NJHS":
+                            cmd = [PYTHON, os.path.join(SCRIPT_DIR, "njhs_deep.py"),
+                                   "--player-slug", str(spid), "--all-seasons"]
+                        else:
+                            cmd = [PYTHON, os.path.join(SCRIPT_DIR, "thf_ahf_deep.py"),
+                                   "--player-id", str(spid), "--all-seasons", "--source", source]
+                        if run(cmd) != 0:
+                            error = f"{source}:{spid} failed"
             except Exception as e:  # noqa: BLE001
                 error = str(e)
             if error:
@@ -107,14 +133,19 @@ def main() -> None:
                 cur.execute(
                     "UPDATE deep_dive_requests SET status='COMPLETED', completed_at=NOW() WHERE id=%s",
                     (req_id,))
-            # Deep-dive finished — clear the "stats being retrieved" notification.
+            # Deep-dive finished — clear the "stats being retrieved" notification
+            # for EVERY login attached to this player (they all got one).
             # DELETE (not UPDATE->RESOLVED) so repeat refreshes don't collide with
             # the (user_id, type, status) unique constraint.
-            cur.execute(
-                "DELETE FROM notifications WHERE user_id=%s AND type='DEEP_DIVE' AND status='ACTIVE'",
-                (user_id,))
+            if player_id is not None:
+                cur.execute(
+                    "DELETE FROM notifications n USING user_players up "
+                    "WHERE n.user_id = up.user_id AND up.player_id = %s "
+                    "AND n.type='DEEP_DIVE' AND n.status='ACTIVE'",
+                    (player_id,))
             conn.commit()
-            print(f"[{req_id}] user {user_id}: {'FAILED - ' + error if error else 'COMPLETED'}", flush=True)
+            print(f"[{req_id}] player {player_id}: "
+                  f"{'FAILED - ' + error if error else 'COMPLETED'}", flush=True)
     finally:
         conn.close()
 

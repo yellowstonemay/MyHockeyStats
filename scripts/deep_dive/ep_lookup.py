@@ -114,6 +114,28 @@ def fetch_career(ep_id: str) -> list[dict]:
     return rows
 
 
+def refresh_career(conn, ep_id: str) -> int:
+    """Fetch and upsert an EP player's career into ep_player_career.
+
+    Shared by the poller (CAREER requests) and by follows_deep.py (daily
+    refresh of EP follows). Caller is responsible for conn.commit().
+    Returns the number of season rows upserted.
+    """
+    rows = fetch_career(ep_id)
+    with conn.cursor() as cur:
+        for row in rows:
+            cur.execute(
+                "INSERT INTO ep_player_career "
+                "(id, ep_player_id, season_label, team_name, league, games_played, goals, assists, points, pim, scraped_at) "
+                "VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW()) "
+                "ON CONFLICT (ep_player_id, season_label, team_name, league) DO UPDATE SET "
+                "games_played=EXCLUDED.games_played, goals=EXCLUDED.goals, assists=EXCLUDED.assists, "
+                "points=EXCLUDED.points, pim=EXCLUDED.pim, scraped_at=EXCLUDED.scraped_at",
+                (ep_id, row["season_label"], row["team_name"], row["league"],
+                 row["games_played"], row["goals"], row["assists"], row["points"], row["pim"]))
+    return len(rows)
+
+
 # ── poll loop ──────────────────────────────────────────────────────────────
 def poll_once(conn) -> int:
     with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
@@ -133,19 +155,8 @@ def poll_once(conn) -> int:
         conn.commit()
         try:
             if rtype == "CAREER" and ep_id:
-                rows = fetch_career(ep_id)
-                with conn.cursor() as cur:
-                    for row in rows:
-                        cur.execute(
-                            "INSERT INTO ep_player_career "
-                            "(id, ep_player_id, season_label, team_name, league, games_played, goals, assists, points, pim, scraped_at) "
-                            "VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW()) "
-                            "ON CONFLICT (ep_player_id, season_label, team_name, league) DO UPDATE SET "
-                            "games_played=EXCLUDED.games_played, goals=EXCLUDED.goals, assists=EXCLUDED.assists, "
-                            "points=EXCLUDED.points, pim=EXCLUDED.pim, scraped_at=EXCLUDED.scraped_at",
-                            (ep_id, row["season_label"], row["team_name"], row["league"],
-                             row["games_played"], row["goals"], row["assists"], row["points"], row["pim"]))
-                print(f"[{req_id}] CAREER {ep_id}: {len(rows)} season(s)", flush=True)
+                n = refresh_career(conn, ep_id)
+                print(f"[{req_id}] CAREER {ep_id}: {n} season(s)", flush=True)
             else:
                 cands = search_ep(name or "")
                 with conn.cursor() as cur:
