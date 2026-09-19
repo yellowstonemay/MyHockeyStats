@@ -20,8 +20,9 @@ __pycache__/
 # Deployment artifacts
 *.tar.gz
 
-# OAuth provider credential downloads (Google/Facebook client secrets)
-oauth/
+# OAuth provider credential downloads (Google/Facebook client secrets).
+# Anchored to the repo root so it cannot swallow the service.oauth Java package.
+/oauth/
 **/client_secret_*.json
 
 # Local credentials for deployed environments (never publish)
