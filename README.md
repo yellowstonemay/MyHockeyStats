@@ -21,6 +21,17 @@ Additional integration test account:
 - **Player**: Paden Zhou (born 2011-05-01)
 - **Season**: 2025-2026
 
+Live-site Ethan Cai test account (registered on the deployed site):
+
+- **Email**: ethan.cai.test@youthhockeystats.us
+- **User**: Ethan Cai (DB id 43, non-admin)
+- **Links**: AYHL + THF players (auto-linked by deep-dive)
+- **Site**: http://192.168.1.156 (LAN) or the Cloudflare tunnel site
+- **Password**: not stored in this repo (it is public). The credential lives in a
+  git-ignored local file (`LOCAL_CREDENTIALS.md`) on the deployment machine.
+- Note: this account's original password was unknown (bcrypt, set via live signup), so it was
+  reset to the shared test password on 2026-09-09 to allow logins for verification.
+
 Note: `seed_data.sql` creates this account/profile only. It does **not** write to `*_player_career` tables.
 
 ## Setup Methods
