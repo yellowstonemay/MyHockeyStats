@@ -124,11 +124,29 @@ async function scrapeTeams(league, seasonYear, options = {}) {
         const pageUrl = settings.url.replace('%d', settings.seasonId);
         console.log(`Navigating to ${pageUrl} ...`);
         await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-        // Wait for the Team dropdown (a <select> with >100 options)
-        await page.waitForFunction(
-            () => Array.from(document.querySelectorAll('select')).some(s => s.options.length > 100),
-            { timeout: 45000 }
-        );
+        // Wait for the Team dropdown (a <select> with >100 options).
+        // polling must be interval-based: the default 'raf' polling never ticks on this
+        // page, so the predicate is never evaluated and the wait always times out even
+        // though the dropdowns are already in the DOM.
+        try {
+            await page.waitForFunction(
+                () => Array.from(document.querySelectorAll('select')).some(s => s.options.length > 100),
+                { timeout: 45000, polling: 500 }
+            );
+        } catch (err) {
+            const diag = await page.evaluate(() => ({
+                title: document.title,
+                readyState: document.readyState,
+                selectOptionCounts: Array.from(document.querySelectorAll('select')).map(s => s.options.length)
+            }));
+            console.error(`Team dropdown not found within 45s: ${err.message}`);
+            console.error(`Page diagnostics: ${JSON.stringify(diag)}`);
+            console.error(`Leaving ${outputPath} unchanged.`);
+            await browser.close();
+            await pool.end();
+            process.exitCode = 1;
+            return;
+        }
         await new Promise(r => setTimeout(r, 2000));
 
         const teamRecords = await page.evaluate((seasonYear) => {

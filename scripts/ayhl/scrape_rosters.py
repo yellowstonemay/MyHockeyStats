@@ -259,23 +259,20 @@ def main():
     elif teams:
         season_year_from_filename = teams[0].get('season_year')
 
-    # Determine output file (default into data/rosters)
+    # Determine output file — always into data/rosters, the only directory
+    # load_rosters_to_db.py scans ("*-ayhl-rosters.csv"). Deriving the path from
+    # input_file used to mirror data/teams/, so the loader never saw the result.
+    rosters_dir = os.path.join(os.path.dirname(__file__), 'data', 'rosters')
     output_file = args.output
     if not output_file:
-        if input_file:
-            # Generate from input: 2025-ayhl-teams.csv -> 2025-ayhl-rosters.csv
-            output_file = input_file.replace('teams.csv', 'rosters.csv')
-
-        if not output_file and season_year_from_filename:
-            # No input file (loaded from DB) — use season year for filename
-            output_file = os.path.join(
-                os.path.dirname(__file__), 'data', 'rosters',
-                f"{season_year_from_filename}-ayhl-rosters.csv"
-            )
-
-        if not output_file:
-            base_name = 'ayhl-rosters.csv'
-            output_file = os.path.join(os.path.dirname(__file__), 'data', 'rosters', base_name)
+        if season_year_from_filename:
+            output_file = os.path.join(rosters_dir, f"{season_year_from_filename}-ayhl-rosters.csv")
+        elif input_file:
+            # 2026-ayhl-teams.csv -> 2026-ayhl-rosters.csv
+            base_name = os.path.basename(input_file).replace('teams.csv', 'rosters.csv')
+            output_file = os.path.join(rosters_dir, base_name)
+        else:
+            output_file = os.path.join(rosters_dir, 'ayhl-rosters.csv')
 
     # Ensure output directory exists
     out_dir = os.path.dirname(output_file)
@@ -330,7 +327,10 @@ def main():
                 '--disable-features=IsolateOrigins,site-per-process',
             ],
         )
-        with open(output_file, 'w', newline='', encoding='utf-8') as csvfile:
+        # Write to a temp file and swap it in only after the scrape succeeds, so
+        # a crash (e.g. Cloudflare closing the page) cannot truncate a good CSV.
+        tmp_file = f"{output_file}.tmp"
+        with open(tmp_file, 'w', newline='', encoding='utf-8') as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
 
@@ -403,7 +403,13 @@ def main():
                 # Polite delay
                 time.sleep(args.delay)
 
-        print(f"\n✅ DONE. Total player rows written: {total_found} to '{output_file}'")
+        if total_found > 0:
+            os.replace(tmp_file, output_file)
+            print(f"\n✅ DONE. Total player rows written: {total_found} to '{output_file}'")
+        else:
+            os.remove(tmp_file)
+            print(f"\n⚠️  Scraped 0 player rows — leaving the existing '{output_file}' untouched.")
+            print("    (Every request likely failed; check for Cloudflare blocking.)")
         browser.close()
 
 
