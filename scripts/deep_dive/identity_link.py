@@ -200,6 +200,10 @@ def main() -> None:
             print("No player profiles found.")
             return
         print(f"Processing {len(players)} player profile(s)...")
+        # AYHL hometowns carry the state ("Basking Ridge, NJ"), so they can
+        # resolve a bare-town profile location for the NJ HS guard.
+        nj_towns = njhs_guard.load_nj_towns(conn)
+        hometowns = njhs_guard.load_hometowns(conn, [p["player_id"] for p in players])
         for p in players:
             name = (p["full_name"] or "").strip()
             if not name:
@@ -215,7 +219,10 @@ def main() -> None:
                 # NJ HS deep-dive is only for high-school-age players who live
                 # in New Jersey (avoid matching same-name players elsewhere).
                 if source == "NJHS":
-                    ok, reason = njhs_guard.qualifies_for_njhs(p["birthdate"], p["location"])
+                    ok, reason = njhs_guard.qualifies_for_njhs(
+                        p["birthdate"], p["location"],
+                        extra_locations=hometowns.get(p["player_id"], ()),
+                        nj_towns=nj_towns)
                     if not ok:
                         print(f"    NJHS: skipped ({reason})")
                         continue

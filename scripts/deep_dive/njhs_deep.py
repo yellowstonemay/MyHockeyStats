@@ -597,14 +597,20 @@ def load_linked(conn) -> list[str]:
     """NJHS-linked players whose profile is high-school age + lives in NJ."""
     with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
         cur.execute(
-            """SELECT DISTINCT psl.source_player_id, pp.birthdate, pp.location
+            """SELECT DISTINCT psl.player_id, psl.source_player_id,
+                              pp.birthdate, pp.location
                FROM player_source_links psl
                JOIN player_profiles pp ON pp.id = psl.player_id
                WHERE psl.source = 'NJHS' AND psl.link_state = 'CONFIRMED'""")
         rows = cur.fetchall()
+    nj_towns = njhs_guard.load_nj_towns(conn)
+    hometowns = njhs_guard.load_hometowns(conn, [r["player_id"] for r in rows])
     out = []
     for r in rows:
-        ok, reason = njhs_guard.qualifies_for_njhs(r["birthdate"], r["location"])
+        ok, reason = njhs_guard.qualifies_for_njhs(
+            r["birthdate"], r["location"],
+            extra_locations=hometowns.get(r["player_id"], ()),
+            nj_towns=nj_towns)
         if ok:
             out.append(r["source_player_id"])
         else:
