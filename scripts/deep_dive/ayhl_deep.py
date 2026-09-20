@@ -70,12 +70,12 @@ def get_conn():
 
 
 def load_ayhl_linked_players(conn) -> list[tuple[str, str]]:
-    """Return [(source_player_id, player_name_or_empty)] from identity map."""
+    """Return [(source_player_id, player_name_or_empty)] from the AYHL links."""
     sql = """
-        SELECT pim.source_player_id, pp.full_name
-        FROM player_identity_map pim
-        LEFT JOIN player_profiles pp ON pp.user_id = pim.user_id
-        WHERE pim.source = 'AYHL' AND pim.link_state = 'CONFIRMED'
+        SELECT psl.source_player_id, pp.full_name
+        FROM player_source_links psl
+        JOIN player_profiles pp ON pp.id = psl.player_id
+        WHERE psl.source = 'AYHL' AND psl.link_state = 'CONFIRMED'
     """
     with conn.cursor() as cur:
         cur.execute(sql)

@@ -42,14 +42,14 @@ scrape_league() {
   cp "$CSV" "$BACKUP"
 
   if [ "$MODE" = "targeted" ]; then
-    # Source tag used in player_identity_map / follows
+    # Source tag used in player_source_links / follows
     local TAG; [ "$LEAGUE" = "thf" ] && TAG=THF || TAG=AHF
     local TEAMIDS
     TEAMIDS=$(docker exec -i hockey-postgres psql -U admin -d hockey_stats -t -A \
       -c "SELECT DISTINCT r.team_id FROM ${LEAGUE}_rosters r
           WHERE r.season_year=${SEASON}
             AND r.player_id::text IN (
-              SELECT source_player_id FROM player_identity_map WHERE source='${TAG}'
+              SELECT source_player_id FROM player_source_links WHERE source='${TAG}'
               UNION
               SELECT source_player_id FROM follows WHERE source='${TAG}'
             );")

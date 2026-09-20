@@ -76,15 +76,14 @@ def get_conn():
 
 def load_linked(conn, source: str, player_id: str | None = None) -> list[tuple[str, str]]:
     sql = """
-        SELECT pim.source_player_id, COALESCE(pp.full_name, u.full_name, '')
-        FROM player_identity_map pim
-        LEFT JOIN users u ON u.id = pim.user_id
-        LEFT JOIN player_profiles pp ON pp.user_id = pim.user_id
-        WHERE pim.source = %s AND pim.link_state = 'CONFIRMED'
+        SELECT psl.source_player_id, COALESCE(pp.full_name, '')
+        FROM player_source_links psl
+        JOIN player_profiles pp ON pp.id = psl.player_id
+        WHERE psl.source = %s AND psl.link_state = 'CONFIRMED'
     """
     params: list = [source]
     if player_id:
-        sql += " AND pim.source_player_id = %s"
+        sql += " AND psl.source_player_id = %s"
         params.append(player_id)
     with conn.cursor() as cur:
         cur.execute(sql, params)

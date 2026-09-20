@@ -594,13 +594,13 @@ def scrape_player(conn, slug: str, season_year: int, all_seasons: bool = False,
 
 
 def load_linked(conn) -> list[str]:
-    """NJHS-linked users whose profile is high-school age + lives in NJ."""
+    """NJHS-linked players whose profile is high-school age + lives in NJ."""
     with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
         cur.execute(
-            """SELECT DISTINCT pim.source_player_id, pp.birthdate, pp.location
-               FROM player_identity_map pim
-               LEFT JOIN player_profiles pp ON pp.user_id = pim.user_id
-               WHERE pim.source = 'NJHS' AND pim.link_state = 'CONFIRMED'""")
+            """SELECT DISTINCT psl.source_player_id, pp.birthdate, pp.location
+               FROM player_source_links psl
+               JOIN player_profiles pp ON pp.id = psl.player_id
+               WHERE psl.source = 'NJHS' AND psl.link_state = 'CONFIRMED'""")
         rows = cur.fetchall()
     out = []
     for r in rows:
