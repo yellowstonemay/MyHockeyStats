@@ -162,10 +162,17 @@ The project has three scraping sources that feed into the database:
 | Source | Frequency | Script(s) | Technology |
 |--------|-----------|-----------|------------|
 | **AYHL** (atlantichockey.org) | Daily: career stats, per-game stats | `scripts/ayhl/daily_update.py`, `scrape_player_games.py` | Python |
-| **AYHL** (atlantichockey.org) | Weekly: team discovery, rosters | `scripts/ayhl/weekly_update.py` | Python |
+| **AYHL** (atlantichockey.org) | Monthly: team discovery, rosters (membership only) | `scripts/ayhl/weekly_update.py` | Python |
 | **THF** (thfhockey.com) | Daily: rosters → career upsert | `scripts/thf-js/scrape_rosters.js`, `upsert_career_from_roster_csv.js` | Node.js/Puppeteer |
-| **THF** (thfhockey.com) | Weekly: teams, games | `scripts/thf-js/scrape_teams.js`, `scrape_games.js` | Node.js/Puppeteer |
+| **THF** (thfhockey.com) | Monthly: team list | `scripts/thf-js/scrape_teams.js` | Node.js/Puppeteer |
+| **AHF** (atlantichockeyfederation.com) | Weekly: rosters (carry live stats) → career upsert | `scripts/thf-js/scrape_rosters.js`, `upsert_career_from_roster_csv.js` | Node.js/Puppeteer |
+| **AHF** (atlantichockeyfederation.com) | Monthly: team list | `scripts/thf-js/scrape_teams.js` | Node.js/Puppeteer |
 | **Gamesheet** (gamesheetstats.com) | On-demand: fetch CSV → load to DB | `scripts/gamesheet/fetch_player_career_stats.py`, `load_gamesheet_career_to_db.py` | Python |
+
+Frequency is chosen by data volatility, not by source convenience:
+`thf_rosters` / `ahf_rosters` hold live per-player stats (gp, goals, assists,
+points, pims, ppg, sog) that change every game, so they refresh daily/weekly.
+`ayhl_roster` holds membership only (no stat columns), so monthly is enough.
 
 ### One-Time Mac Mini Setup
 
@@ -183,7 +190,8 @@ This installs all Python & Node.js packages, creates log directories, and sets u
 | Schedule | Script | When |
 |----------|--------|------|
 | 🕐 Daily | `run_daily.sh` | 6:00 AM every day |
-| 🕐 Weekly | `run_weekly.sh` | 7:00 AM every Monday |
+| 🕐 Weekly | `run_rosters_weekly.sh` | 8:00 AM every Monday (AHF rosters + live stats) |
+| 🕐 Monthly | `run_monthly.sh` | 7:00 AM on the 1st (AYHL rosters + team lists) |
 
 ### Manual Runs
 
@@ -200,8 +208,14 @@ bash scripts/run_daily.sh --season 2025
 # Dry run (scrape but don't write to DB):
 bash scripts/run_daily.sh --dry-run
 
-# Weekly pipeline:
-bash scripts/run_weekly.sh
+# Weekly AHF pipeline:
+bash scripts/run_rosters_weekly.sh
+
+# Monthly AYHL rosters + league team lists:
+bash scripts/run_monthly.sh
+
+# AYHL rosters/teams only (interactive wrapper, same three steps):
+python scripts/ayhl/weekly_update.py --season 2025
 ```
 
 ### From Windows (PowerShell) — Run against remote Mac mini DB

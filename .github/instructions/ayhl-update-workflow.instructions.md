@@ -129,9 +129,10 @@ python scripts/ayhl/daily_update.py --dry-run
 
 ### `ayhl_roster`
 
-Raw roster data scraped weekly from atlantichockey.org.  
+Raw roster data scraped monthly from atlantichockey.org (membership only —
+`ayhl_roster` has no stat columns, so nothing in it goes stale mid-month).  
 One row per `(season_year, league_id, team_id, player_id)`.  
-Managed by `load_rosters_to_db.py` (via `weekly_update.py`).
+Managed by `load_rosters_to_db.py` (via `run_monthly.sh` / `weekly_update.py`).
 
 | Column            | Type         | Notes                                     |
 |-------------------|--------------|-------------------------------------------|
@@ -213,9 +214,10 @@ Flyway migration: `V20260327_01__ayhl_career_change_tables.sql`
   checkpoint file.
 - Only the **current season** is scraped/synced during daily updates to avoid
   unnecessary re-scraping of historical seasons.
-- The weekly update must run before the daily update for a new season, because
-   `daily_update.py` reads `ayhl_roster` (with `ayhl_player_career` fallback)
-   to build its player list.
+- The roster/team update must run before the daily update for a new season,
+   because `daily_update.py` reads `ayhl_roster` (with `ayhl_player_career`
+   fallback) to build its player list. It is scheduled monthly (`run_monthly.sh`,
+   1st at 7:00 AM) since rosters change rarely mid-season.
 - `SEASON_TO_ID` mapping lives in `discover_teams.py`. When a new season
   becomes available, add `<year>: <id>` to the top of the dict.
 
@@ -224,7 +226,10 @@ Flyway migration: `V20260327_01__ayhl_career_change_tables.sql`
 ## Common CLI Reference
 
 ```bash
-# Weekly (full pipeline)
+# Monthly (full AYHL team + roster pipeline, scheduled wrapper)
+bash scripts/run_monthly.sh
+
+# Same pipeline via the Python orchestrator
 python scripts/ayhl/weekly_update.py --season 2025
 
 # Daily (career stats sync)
