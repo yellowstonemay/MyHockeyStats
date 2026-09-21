@@ -54,7 +54,8 @@ public class AdminController {
     /**
      * GET /api/admin/players — all registered logins ordered by registration
      * time (newest first), with last login, the players attached to the login,
-     * and how many source identities those players are linked to.
+     * how many source identities those players are linked to, and the outcome of
+     * the most recent deep-dive covering any of them.
      */
     @GetMapping("/players")
     public ResponseEntity<?> listPlayers(
@@ -69,12 +70,32 @@ public class AdminController {
                    COUNT(DISTINCT up.player_id) AS player_count,
                    COUNT(DISTINCT psl.id) AS link_count,
                    STRING_AGG(DISTINCT psl.source, ',') AS sources,
-                   MAX(psl.last_verified_at) AS last_deep_dive_at
+                   last_dd.source                AS last_deep_dive_source,
+                   last_dd.last_deep_dive_at     AS last_deep_dive_at,
+                   last_dd.last_deep_dive_status AS last_deep_dive_status,
+                   last_dd.last_deep_dive_error  AS last_deep_dive_error
             FROM users u
             LEFT JOIN user_players up ON up.user_id = u.id
             LEFT JOIN player_profiles pp ON pp.id = up.player_id
             LEFT JOIN player_source_links psl ON psl.player_id = up.player_id
-            GROUP BY u.id, u.email, u.full_name, u.is_admin, u.created_at, u.last_login_at
+            -- Last deep-dive RESULT for this login's players. last_verified_at
+            -- cannot be used here: identity_link.py refreshes it on every run, so
+            -- a source that fails every day still looks freshly verified.
+            -- The outcome and the timestamp have to come from one row, so they
+            -- are joined together instead of aggregated one by one.
+            LEFT JOIN LATERAL (
+                SELECT l.source, l.last_deep_dive_at,
+                       l.last_deep_dive_status, l.last_deep_dive_error
+                FROM player_source_links l
+                JOIN user_players lup ON lup.player_id = l.player_id
+                WHERE lup.user_id = u.id
+                  AND l.last_deep_dive_at IS NOT NULL
+                ORDER BY l.last_deep_dive_at DESC
+                LIMIT 1
+            ) last_dd ON TRUE
+            GROUP BY u.id, u.email, u.full_name, u.is_admin, u.created_at, u.last_login_at,
+                     last_dd.source, last_dd.last_deep_dive_at,
+                     last_dd.last_deep_dive_status, last_dd.last_deep_dive_error
             ORDER BY u.created_at DESC
             """;
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql);

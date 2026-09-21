@@ -33,6 +33,8 @@ import psycopg2.extras
 import requests
 from bs4 import BeautifulSoup
 
+import deep_dive_status
+
 BASE_URL = "https://atlantichockey.org/playerpage.php?playerid={pid}"
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -577,6 +579,11 @@ def main() -> None:
                              all_seasons=args.all_seasons, dry_run=args.dry_run)
             except Exception as e:
                 print(f"  {pid}: ERROR {e}")
+                if not args.dry_run:
+                    deep_dive_status.record_outcome(conn, "AYHL", pid, ok=False, error=e)
+                continue
+            if not args.dry_run:
+                deep_dive_status.record_outcome(conn, "AYHL", pid, ok=True)
     finally:
         conn.close()
 

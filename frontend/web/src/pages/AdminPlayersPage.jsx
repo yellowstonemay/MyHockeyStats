@@ -170,11 +170,31 @@ export default function AdminPlayersPage() {
   const staleThresholdDays = 2
   const status = (p) => {
     if (!p.link_count || Number(p.link_count) === 0) return { label: 'No links', cls: 'bg-slate-100 text-slate-600' }
+    if (p.last_deep_dive_status === 'FAILED') return { label: 'Failed', cls: 'bg-red-100 text-red-700' }
     const since = daysSince(p.last_deep_dive_at)
     if (since == null || since > staleThresholdDays) {
       return { label: 'Stale', cls: 'bg-amber-100 text-amber-700' }
     }
     return { label: 'Current', cls: 'bg-emerald-100 text-emerald-700' }
+  }
+
+  // How the most recent deep-dive of this player actually ended, not just when
+  // it was attempted (a failing source keeps its link "verified" every run).
+  const deepDive = (p) => {
+    if (!p.last_deep_dive_at) {
+      return { label: 'Never', cls: 'bg-slate-100 text-slate-500', when: null, title: 'No deep-dive recorded yet' }
+    }
+    const when = fmt(p.last_deep_dive_at)
+    const src = p.last_deep_dive_source ? ` (${p.last_deep_dive_source})` : ''
+    if (p.last_deep_dive_status === 'FAILED') {
+      return {
+        label: 'Failed',
+        cls: 'bg-red-100 text-red-700',
+        when,
+        title: `Failed ${when}${src}: ${p.last_deep_dive_error || 'unknown error'}`,
+      }
+    }
+    return { label: 'Success', cls: 'bg-emerald-100 text-emerald-700', when, title: `Succeeded ${when}${src}` }
   }
 
   return (
@@ -225,7 +245,7 @@ export default function AdminPlayersPage() {
           <Card>
             <CardHeader>
               <CardTitle>Players ({players.length})</CardTitle>
-              <CardDescription>Registration, last visit, and deep-dive freshness. The <strong>Full deep-dive</strong> button enqueues an all-seasons backfill for that player (picked up by the Mac mini poller).</CardDescription>
+              <CardDescription>Registration, last visit, and deep-dive freshness. <strong>Last deep-dive</strong> shows whether the most recent scrape of that player succeeded or failed (hover for the reason and the source). The <strong>Full deep-dive</strong> button enqueues an all-seasons backfill for that player (picked up by the Mac mini poller).</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="overflow-x-auto">
@@ -246,6 +266,7 @@ export default function AdminPlayersPage() {
                   <tbody>
                     {players.map((p) => {
                       const st = status(p)
+                      const dd = deepDive(p)
                       const hasLinks = Number(p.link_count) > 0
                       return (
                         <tr key={p.id} className="border-t border-slate-200 hover:bg-slate-50">
@@ -258,7 +279,10 @@ export default function AdminPlayersPage() {
                             <span className="ml-1 text-xs text-slate-400">({p.link_count ?? 0})</span>
                           </td>
                           <td className="px-3 py-2 whitespace-nowrap">{fmt(p.last_login_at)}</td>
-                          <td className="px-3 py-2 whitespace-nowrap">{fmt(p.last_deep_dive_at)}</td>
+                          <td className="px-3 py-2 whitespace-nowrap">
+                            <span className={`text-xs px-2 py-1 rounded-full ${dd.cls}`} title={dd.title}>{dd.label}</span>
+                            {dd.when ? <span className="ml-2 text-xs text-slate-500">{dd.when}</span> : null}
+                          </td>
                           <td className="px-3 py-2">
                             <span className={`text-xs px-2 py-1 rounded-full ${st.cls}`}>{st.label}</span>
                           </td>

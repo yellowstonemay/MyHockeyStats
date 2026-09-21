@@ -33,6 +33,8 @@ from uuid import uuid4
 import psycopg2
 import psycopg2.extras
 
+import deep_dive_status
+
 SEASON_LABEL_BY_YEAR = {
     2026: "2026-2027 Season",
     2025: "2025-2026 Season",
@@ -427,24 +429,33 @@ def main() -> None:
             links = load_linked(conn, source, player_id=args.player_id)
             print(f"[{source}] {len(links)} linked user(s)")
             for player_id, pname in links:
-                season_year = scope_year
-                rows = latest_roster_stats(conn, source, player_id, season_year=season_year)
-                if not rows:
-                    print(f"  {player_id}: no roster rows")
-                total_changes = 0
-                for row in rows:
-                    season_year = int(row["season_year"])
-                    label = SEASON_LABEL_BY_YEAR.get(season_year, f"{season_year}-{season_year + 1} Season")
-                    changes = upsert_career(conn, source, player_id, season_year, label, row, args.dry_run)
-                    total_changes += len(changes)
-                    print(f"  {player_id}: {row.get('player_name')} {row.get('team_name')} {label} "
-                          f"G={row.get('goals')} A={row.get('assists')} PTS={row.get('points')}"
-                          f" -> {len(changes)} change(s){' (dry-run)' if args.dry_run else ''}")
-                if total_changes == 0 and not args.dry_run:
-                    print(f"  {player_id}: no stat changes")
-                # Game-by-game history (upsert into *_player_games; never deletes)
-                upsert_player_games(conn, source, player_id, pname,
-                                    season_year=scope_year, dry_run=args.dry_run)
+                try:
+                    season_year = scope_year
+                    rows = latest_roster_stats(conn, source, player_id, season_year=season_year)
+                    if not rows:
+                        print(f"  {player_id}: no roster rows")
+                    total_changes = 0
+                    for row in rows:
+                        season_year = int(row["season_year"])
+                        label = SEASON_LABEL_BY_YEAR.get(season_year, f"{season_year}-{season_year + 1} Season")
+                        changes = upsert_career(conn, source, player_id, season_year, label, row, args.dry_run)
+                        total_changes += len(changes)
+                        print(f"  {player_id}: {row.get('player_name')} {row.get('team_name')} {label} "
+                              f"G={row.get('goals')} A={row.get('assists')} PTS={row.get('points')}"
+                              f" -> {len(changes)} change(s){' (dry-run)' if args.dry_run else ''}")
+                    if total_changes == 0 and not args.dry_run:
+                        print(f"  {player_id}: no stat changes")
+                    # Game-by-game history (upsert into *_player_games; never deletes)
+                    upsert_player_games(conn, source, player_id, pname,
+                                        season_year=scope_year, dry_run=args.dry_run)
+                except Exception as e:
+                    # One broken player must not abandon the rest of the run.
+                    print(f"  {player_id}: ERROR {e}")
+                    if not args.dry_run:
+                        deep_dive_status.record_outcome(conn, source, player_id, ok=False, error=e)
+                    continue
+                if not args.dry_run:
+                    deep_dive_status.record_outcome(conn, source, player_id, ok=True)
     finally:
         conn.close()
 

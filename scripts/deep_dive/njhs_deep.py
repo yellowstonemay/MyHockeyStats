@@ -29,6 +29,8 @@ from bs4 import BeautifulSoup
 
 import njhs_guard
 
+import deep_dive_status
+
 BASE = "https://highschoolsports.nj.com"
 SPORT = "boysicehockey"
 HEADERS = {
@@ -553,17 +555,20 @@ def upsert_games(conn, slug: str, name: str, school: str,
 
 
 def scrape_player(conn, slug: str, season_year: int, all_seasons: bool = False,
-                  dry_run: bool = False) -> None:
+                  dry_run: bool = False) -> str | None:
     """Scrape one player's career + game log. Default = the season's page (career
     table shows all seasons, game log shows the requested season). With
-    --all-seasons, also fetch each season's page for its own game log."""
+    --all-seasons, also fetch each season's page for its own game log.
+
+    Returns None on success, or the failure reason when the player's page could
+    not be fetched at all."""
     label = season_label(season_year)
     url = f"{BASE}/player/{slug}/{SPORT}/season/{label}"
     try:
         soup = fetch_soup(url)
     except Exception as e:
         print(f"  {slug}: ERROR {e}")
-        return
+        return str(e)
     school, name = parse_player_header(soup)
     career = parse_career_table(soup)
     games = parse_game_log(soup)
@@ -591,6 +596,18 @@ def scrape_player(conn, slug: str, season_year: int, all_seasons: bool = False,
                 upsert_games(conn, slug, name, school, sy, cgames, dry_run)
             print(f"    {c['season_label']}: G={c.get('goals')} A={c.get('assists')} P={c.get('points')} "
                   f"games={len(cgames)}")
+    return None
+
+
+def run_and_record(conn, slug: str, season_year: int, all_seasons: bool,
+                   dry_run: bool) -> None:
+    """Scrape one player and record the outcome for the admin page."""
+    try:
+        err = scrape_player(conn, slug, season_year, all_seasons=all_seasons, dry_run=dry_run)
+    except Exception as e:  # one broken player must not abandon the rest of the run
+        print(f"  {slug}: ERROR {e}")
+        err = str(e)
+    deep_dive_status.record_outcome(conn, "NJHS", slug, ok=err is None, error=err)
 
 
 def load_linked(conn) -> list[str]:
@@ -643,8 +660,8 @@ def main() -> None:
             print(f"Team stats scrape done: {total} player rows")
             return
         if args.player_slug:
-            scrape_player(conn, args.player_slug, season_year,
-                          all_seasons=args.all_seasons, dry_run=args.dry_run)
+            run_and_record(conn, args.player_slug, season_year,
+                           all_seasons=args.all_seasons, dry_run=args.dry_run)
             return
         slugs = load_linked(conn)
         if not slugs:
@@ -652,8 +669,8 @@ def main() -> None:
             return
         print(f"Deep-diving {len(slugs)} NJHS player(s)...")
         for slug in slugs:
-            scrape_player(conn, slug, season_year,
-                          all_seasons=args.all_seasons, dry_run=args.dry_run)
+            run_and_record(conn, slug, season_year,
+                           all_seasons=args.all_seasons, dry_run=args.dry_run)
     finally:
         if conn:
             conn.close()
