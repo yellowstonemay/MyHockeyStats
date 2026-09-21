@@ -1,5 +1,6 @@
 package com.myhockeystats.service;
 
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
@@ -65,10 +66,17 @@ public class DeepDiveService {
             }
         }
 
-        jdbcTemplate.update(
-            "INSERT INTO deep_dive_requests (id, player_id, user_id, scope, status, requested_at) " +
-            "VALUES (gen_random_uuid(), ?, ?, 'ALL_SEASONS', 'PENDING', NOW())",
-            playerId, requestedByUserId);
+        try {
+            jdbcTemplate.update(
+                "INSERT INTO deep_dive_requests (id, player_id, user_id, scope, status, requested_at) " +
+                "VALUES (gen_random_uuid(), ?, ?, 'ALL_SEASONS', 'PENDING', NOW())",
+                playerId, requestedByUserId);
+        } catch (DataIntegrityViolationException e) {
+            // uq_deep_dive_requests_active_player: a request for this player was
+            // inserted between the check above and this insert (double-click, or
+            // the poller claiming the row). The existing request wins.
+            return new QueueResult(false, "These stats are already being refreshed.");
+        }
 
         // Notify every login attached to this player, not just the requester.
         for (Long userId : playerProfileService.getUserIdsForPlayer(playerId)) {

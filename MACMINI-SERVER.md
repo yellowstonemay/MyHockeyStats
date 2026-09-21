@@ -201,8 +201,16 @@ This installs Python packages, Node modules, creates log directories, and sets u
 | **Daily** 🕐 | `run_daily.sh` | 3:00 AM every day | MHR season stats, AYHL deep dive + per-game, THF rosters + career, gamesheet |
 | **Daily** 🕐 | `scrape_games_scheduled.sh targeted` | 4:00 AM every day | THF/AHF game results for linked/followed players' teams |
 | **Daily** 🕐 | `deep_dive/run_deep_dive.sh` | 6:00 AM every day | Registered-user identity link + full career deep dive (AYHL/THF/AHF) |
+| **Every 5 min** 🕐 | `deep_dive/run_deep_dive_requests.py` | :00, :05, :10 … | On-demand deep-dives queued from the site (one request per player, `flock`-guarded) |
 | **Weekly** 🕐 | `run_rosters_weekly.sh` | 8:00 AM every Monday | AHF rosters + live per-player stats + career/change events |
 | **Monthly** 🕐 | `run_monthly.sh` | 7:00 AM on the 1st | AYHL teams + rosters (membership only), THF/AHF team lists |
+
+Clicking **Deep-dive** on the admin page (or "refresh my stats" in the app) does not scrape
+inline: the API writes `PENDING` rows to `deep_dive_requests` and the 5-minute poller above
+claims them on its next tick. The admin page opens a status popup that polls
+`GET /api/admin/deep-dive/requests/{userId}` until every request is `COMPLETED`/`FAILED`, and a
+player that already has a request in flight is refused
+(`uq_deep_dive_requests_active_player`).
 
 ### Manual Run
 

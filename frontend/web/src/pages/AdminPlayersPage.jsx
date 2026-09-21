@@ -3,7 +3,8 @@ import { useAuth } from '../lib/AuthContext'
 import { integrationsApi } from '../lib/integrationsApi'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/Card'
 import { Button } from '../components/Button'
-import { AlertCircle, Loader2, RefreshCw, Radar, Inbox } from 'lucide-react'
+import DeepDiveStatusDialog from '../components/DeepDiveStatusDialog'
+import { AlertCircle, Clock, Loader2, RefreshCw, Radar, Inbox } from 'lucide-react'
 
 function fmt(ts) {
   if (!ts) return '—'
@@ -27,6 +28,7 @@ export default function AdminPlayersPage() {
   const [isAdmin, setIsAdmin] = useState(!!user?.isAdmin)
   const [triggeringId, setTriggeringId] = useState(null)
   const [actionMsg, setActionMsg] = useState(null)
+  const [ddDialog, setDdDialog] = useState(null)
 
   const [messages, setMessages] = useState([])
   const [messagesLoading, setMessagesLoading] = useState(false)
@@ -155,16 +157,27 @@ export default function AdminPlayersPage() {
   }
 
   const triggerDeepDive = async (p) => {
+    const who = p.user_name || p.email
     setTriggeringId(p.id)
     setActionMsg(null)
     try {
       const resp = await integrationsApi.triggerDeepDive(p.id)
-      setActionMsg({ kind: 'ok', text: `${p.user_name || p.email}: ${resp.message}` })
+      setActionMsg({ kind: 'ok', text: `${who}: ${resp.message}` })
+      // Show the queue straight away — the run itself happens on the Mac mini
+      // poller, so the table alone would look like nothing happened.
+      setDdDialog({ userId: p.id, label: who, message: resp.message })
+      await load()
     } catch (err) {
-      setActionMsg({ kind: 'err', text: `${p.user_name || p.email}: ${err.message || 'Failed to enqueue'}` })
+      const text = err.message || 'Failed to enqueue'
+      setActionMsg({ kind: 'err', text: `${who}: ${text}` })
+      setDdDialog({ userId: p.id, label: who, message: text })
     } finally {
       setTriggeringId(null)
     }
+  }
+
+  const openDeepDiveStatus = (p) => {
+    setDdDialog({ userId: p.id, label: p.user_name || p.email, message: null })
   }
 
   const staleThresholdDays = 2
@@ -195,6 +208,22 @@ export default function AdminPlayersPage() {
       }
     }
     return { label: 'Success', cls: 'bg-emerald-100 text-emerald-700', when, title: `Succeeded ${when}${src}` }
+  }
+
+  // Is a deep-dive already queued/running for this login? The button then shows
+  // the queue state and opens the status dialog instead of enqueuing a second
+  // run (the backend refuses duplicates anyway).
+  const requestState = (p) => {
+    if (triggeringId === p.id) {
+      return { active: false, label: 'Deep-dive', icon: <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> }
+    }
+    if (p.deep_dive_request_status === 'RUNNING') {
+      return { active: true, label: 'Running…', icon: <Loader2 className="w-3.5 h-3.5 animate-spin mr-1 text-sky-600" /> }
+    }
+    if (p.deep_dive_request_status === 'PENDING') {
+      return { active: true, label: 'Queued…', icon: <Clock className="w-3.5 h-3.5 mr-1 text-amber-600" /> }
+    }
+    return { active: false, label: 'Deep-dive', icon: <Radar className="w-3.5 h-3.5 mr-1" /> }
   }
 
   return (
@@ -245,7 +274,7 @@ export default function AdminPlayersPage() {
           <Card>
             <CardHeader>
               <CardTitle>Players ({players.length})</CardTitle>
-              <CardDescription>Registration, last visit, and deep-dive freshness. <strong>Last deep-dive</strong> shows whether the most recent scrape of that player succeeded or failed (hover for the reason and the source). The <strong>Full deep-dive</strong> button enqueues an all-seasons backfill for that player (picked up by the Mac mini poller).</CardDescription>
+              <CardDescription>Registration, last visit, and deep-dive freshness. <strong>Last deep-dive</strong> shows whether the most recent scrape of that player succeeded or failed (hover for the reason and the source). The <strong>Full deep-dive</strong> button enqueues an all-seasons backfill for that player (picked up by the Mac mini poller) and opens a status popup; while a refresh is queued or running the button reads <strong>Queued…</strong>/<strong>Running…</strong> and reopens that popup instead of enqueuing a second run.</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="overflow-x-auto">
@@ -267,6 +296,7 @@ export default function AdminPlayersPage() {
                     {players.map((p) => {
                       const st = status(p)
                       const dd = deepDive(p)
+                      const ddr = requestState(p)
                       const hasLinks = Number(p.link_count) > 0
                       return (
                         <tr key={p.id} className="border-t border-slate-200 hover:bg-slate-50">
@@ -289,13 +319,19 @@ export default function AdminPlayersPage() {
                           <td className="px-3 py-2">
                             <Button
                               size="sm"
-                              variant="outline"
+                              variant={ddr.active ? 'secondary' : 'outline'}
                               disabled={!hasLinks || triggeringId === p.id}
-                              onClick={() => triggerDeepDive(p)}
-                              title={hasLinks ? 'Enqueue full all-seasons deep-dive' : 'Player has no identity links'}
+                              onClick={() => (ddr.active ? openDeepDiveStatus(p) : triggerDeepDive(p))}
+                              title={
+                                !hasLinks
+                                  ? 'Player has no identity links'
+                                  : ddr.active
+                                    ? 'Already queued — click to see the status'
+                                    : 'Enqueue full all-seasons deep-dive'
+                              }
                             >
-                              {triggeringId === p.id ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : <Radar className="w-3.5 h-3.5 mr-1" />}
-                              Deep-dive
+                              {ddr.icon}
+                              {ddr.label}
                             </Button>
                           </td>
                         </tr>
@@ -475,6 +511,19 @@ export default function AdminPlayersPage() {
           </Card>
         )}
       </div>
+
+      {isAdmin && ddDialog && (
+        <DeepDiveStatusDialog
+          userId={ddDialog.userId}
+          label={ddDialog.label}
+          message={ddDialog.message}
+          onClose={() => {
+            setDdDialog(null)
+            load()
+          }}
+          onFinished={load}
+        />
+      )}
     </div>
   )
 }

@@ -73,7 +73,10 @@ public class AdminController {
                    last_dd.source                AS last_deep_dive_source,
                    last_dd.last_deep_dive_at     AS last_deep_dive_at,
                    last_dd.last_deep_dive_status AS last_deep_dive_status,
-                   last_dd.last_deep_dive_error  AS last_deep_dive_error
+                   last_dd.last_deep_dive_error  AS last_deep_dive_error,
+                   req.status                    AS deep_dive_request_status,
+                   req.requested_at              AS deep_dive_requested_at,
+                   req.started_at                AS deep_dive_request_started_at
             FROM users u
             LEFT JOIN user_players up ON up.user_id = u.id
             LEFT JOIN player_profiles pp ON pp.id = up.player_id
@@ -93,9 +96,21 @@ public class AdminController {
                 ORDER BY l.last_deep_dive_at DESC
                 LIMIT 1
             ) last_dd ON TRUE
+            -- Newest deep-dive request covering this login's players. An
+            -- in-flight one wins over a finished one, so the row can tell the
+            -- admin "a refresh is queued/running" and disable a second click.
+            LEFT JOIN LATERAL (
+                SELECT r.status, r.requested_at, r.started_at
+                FROM deep_dive_requests r
+                JOIN user_players rup ON rup.player_id = r.player_id
+                WHERE rup.user_id = u.id
+                ORDER BY (r.status IN ('PENDING', 'RUNNING')) DESC, r.requested_at DESC
+                LIMIT 1
+            ) req ON TRUE
             GROUP BY u.id, u.email, u.full_name, u.is_admin, u.created_at, u.last_login_at,
                      last_dd.source, last_dd.last_deep_dive_at,
-                     last_dd.last_deep_dive_status, last_dd.last_deep_dive_error
+                     last_dd.last_deep_dive_status, last_dd.last_deep_dive_error,
+                     req.status, req.requested_at, req.started_at
             ORDER BY u.created_at DESC
             """;
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql);
@@ -181,6 +196,49 @@ public class AdminController {
         return ResponseEntity.ok(Map.of(
             "message", result.message(),
             "queued", result.queued()));
+    }
+
+    /**
+     * GET /api/admin/deep-dive/requests/{userId} — the deep-dive queue for every
+     * player attached to a login, newest first.
+     *
+     * A click on the admin page enqueues one request per player of that login
+     * and then waits for the Mac mini poller, which can be minutes away, so the
+     * page polls this to show what happened to the click.
+     */
+    @GetMapping("/deep-dive/requests/{userId}")
+    public ResponseEntity<?> listDeepDiveRequests(
+            @PathVariable Long userId,
+            @RequestHeader(value = "Authorization", required = false) String authHeader) {
+        if (resolveAdmin(authHeader).isEmpty()) {
+            return ResponseEntity.status(403).body(Map.of("error", "Admin access required"));
+        }
+        String sql = """
+            SELECT r.id::text AS id, r.player_id,
+                   pp.full_name AS player_name,
+                   r.status, r.requested_at, r.started_at, r.completed_at, r.error,
+                   links.sources AS sources
+            FROM deep_dive_requests r
+            JOIN player_profiles pp ON pp.id = r.player_id
+            JOIN user_players up ON up.player_id = r.player_id AND up.user_id = ?
+            LEFT JOIN LATERAL (
+                SELECT STRING_AGG(DISTINCT l.source, ',') AS sources
+                FROM player_source_links l
+                WHERE l.player_id = r.player_id AND l.link_state = 'CONFIRMED'
+            ) links ON TRUE
+            WHERE r.status IN ('PENDING', 'RUNNING')
+               OR r.requested_at > NOW() - INTERVAL '7 days'
+            ORDER BY r.requested_at DESC
+            LIMIT 25
+            """;
+        List<Map<String, Object>> requests = jdbcTemplate.queryForList(sql, userId);
+        long active = requests.stream()
+            .filter(r -> "PENDING".equals(r.get("status")) || "RUNNING".equals(r.get("status")))
+            .count();
+        Map<String, Object> body = new HashMap<>();
+        body.put("requests", requests);
+        body.put("active", active);
+        return ResponseEntity.ok(body);
     }
 
     /** GET /api/admin/messages — all support/report messages, NEW first. */

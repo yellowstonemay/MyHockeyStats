@@ -75,6 +75,11 @@ export const integrationsApi = {
     })
   },
 
+  // Admin: the deep-dive queue of that login's players (drives the status dialog)
+  fetchDeepDiveRequests(userId) {
+    return api.fetchWithAuth(`/admin/deep-dive/requests/${encodeURIComponent(userId)}`)
+  },
+
   // Notifications (e.g. "stats being retrieved" while a deep-dive runs)
   fetchNotifications() {
     return api.fetchWithAuth('/notifications')
