@@ -198,7 +198,9 @@ This installs Python packages, Node modules, creates log directories, and sets u
 
 | Schedule | Script | When | What |
 |----------|--------|------|------|
-| **Daily** 🕐 | `run_daily.sh` | 6:00 AM every day | MHR season stats, AYHL deep dive + per-game, THF rosters + career, gamesheet |
+| **Daily** 🕐 | `run_daily.sh` | 3:00 AM every day | MHR season stats, AYHL deep dive + per-game, THF rosters + career, gamesheet |
+| **Daily** 🕐 | `scrape_games_scheduled.sh targeted` | 4:00 AM every day | THF/AHF game results for linked/followed players' teams |
+| **Daily** 🕐 | `deep_dive/run_deep_dive.sh` | 6:00 AM every day | Registered-user identity link + full career deep dive (AYHL/THF/AHF) |
 | **Weekly** 🕐 | `run_rosters_weekly.sh` | 8:00 AM every Monday | AHF rosters + live per-player stats + career/change events |
 | **Monthly** 🕐 | `run_monthly.sh` | 7:00 AM on the 1st | AYHL teams + rosters (membership only), THF/AHF team lists |
 
@@ -402,7 +404,7 @@ chmod +x ~/hockey-server/scripts/*.sh
 | `.github/agents/db-server.agent.md` | VS Code custom agent for Mac mini |
 | `scripts/deploy-to-macmini.ps1` | One-click deploy to Mac mini |
 | `scripts/setup-macmini.sh` | One-time Mac mini setup (deps + cron) |
-| `scripts/run_daily.sh` | Daily scraping pipeline (6 AM) |
+| `scripts/run_daily.sh` | Daily scraping pipeline (3 AM) |
 | `scripts/run_rosters_weekly.sh` | Weekly AHF roster + live stats pipeline (Mon 8 AM) |
 | `scripts/run_monthly.sh` | Monthly AYHL membership rosters + league team lists (1st, 7 AM) |
 | `scripts/ayhl/` | AYHL scraper scripts (Python) |

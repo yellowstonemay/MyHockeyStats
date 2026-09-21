@@ -189,7 +189,9 @@ This installs all Python & Node.js packages, creates log directories, and sets u
 
 | Schedule | Script | When |
 |----------|--------|------|
-| 🕐 Daily | `run_daily.sh` | 6:00 AM every day |
+| 🕐 Daily | `run_daily.sh` | 3:00 AM every day |
+| 🕐 Daily | `scrape_games_scheduled.sh targeted` | 4:00 AM every day (THF/AHF games for linked players) |
+| 🕐 Daily | `deep_dive/run_deep_dive.sh` | 6:00 AM every day (registered-user career deep dive) |
 | 🕐 Weekly | `run_rosters_weekly.sh` | 8:00 AM every Monday (AHF rosters + live stats) |
 | 🕐 Monthly | `run_monthly.sh` | 7:00 AM on the 1st (AYHL rosters + team lists) |
 

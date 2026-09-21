@@ -70,7 +70,7 @@ echo "────────────────────────�
 echo "  [5/5] Setting up cron schedule..."
 echo "─────────────────────────────────────────────────────────────────────────"
 
-CRON_DAILY="0 6 * * * $PROJECT_DIR/scripts/run_daily.sh >> $PROJECT_DIR/logs/daily.log 2>&1"
+CRON_DAILY="0 3 * * * $PROJECT_DIR/scripts/run_daily.sh >> $PROJECT_DIR/logs/daily.log 2>&1"
 CRON_WEEKLY="0 7 * * 1 $PROJECT_DIR/scripts/run_weekly.sh >> $PROJECT_DIR/logs/weekly.log 2>&1"
 
 # Add to crontab (skip if already present)
@@ -81,7 +81,7 @@ CRON_WEEKLY="0 7 * * 1 $PROJECT_DIR/scripts/run_weekly.sh >> $PROJECT_DIR/logs/w
     || (crontab -l 2>/dev/null; echo "$CRON_WEEKLY") | crontab -
 
 echo "  ✓ Cron jobs installed:"
-echo "    Daily:   6:00 AM every day     — $PROJECT_DIR/scripts/run_daily.sh"
+echo "    Daily:   3:00 AM every day     — $PROJECT_DIR/scripts/run_daily.sh"
 echo "    Weekly:  7:00 AM every Monday  — $PROJECT_DIR/scripts/run_weekly.sh"
 echo ""
 

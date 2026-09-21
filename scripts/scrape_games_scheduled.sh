@@ -7,8 +7,8 @@
 #   full      -> scrape every THF/AHF team for the season (weekly catch-all).
 #
 # Why two-stage: scrape_games.js fills thf_games/ahf_games with new game results
-# + parsed scoresheets. The 9:00 AM run_deep_dive.sh then rolls those into each
-# player's *_player_games (game history). This script should run BEFORE 9:00 AM.
+# + parsed scoresheets. The 6:00 AM run_deep_dive.sh then rolls those into each
+# player's *_player_games (game history). This script should run BEFORE 6:00 AM.
 #
 # Requires the OPTIMIZED scrape_games.js (concurrency + throttled downloads) and
 # a PYTHON that has pdfplumber (the deep-dive venv). Uses DB env vars below.

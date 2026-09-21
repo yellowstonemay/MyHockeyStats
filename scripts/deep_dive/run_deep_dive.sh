@@ -14,8 +14,8 @@
 #   3. thf_ahf_deep.py    -> for THF/AHF-linked users, roll latest roster stats
 #                            up into the career tables with change detection
 #
-# Schedule (Mac mini cron — daily at 9:00 AM):
-#   0 9 * * * ~/hockey-server/scripts/deep_dive/run_deep_dive.sh >> ~/hockey-server/logs/deep-dive.log 2>&1
+# Schedule (Mac mini cron — daily at 6:00 AM):
+#   0 6 * * * ~/hockey-server/scripts/deep_dive/run_deep_dive.sh >> ~/hockey-server/logs/deep-dive.log 2>&1
 #
 # Usage:
 #   bash run_deep_dive.sh             # full run

@@ -12,7 +12,7 @@
 #
 # Schedule (Mac mini cron):
 #   crontab -e
-#   0 6 * * * /bin/bash /Users/ethan-macmini/hockey-server/scripts/run_daily.sh >> /Users/ethan-macmini/hockey-server/logs/daily.log 2>&1
+#   0 3 * * * /bin/bash /Users/ethan-macmini/hockey-server/scripts/run_daily.sh >> /Users/ethan-macmini/hockey-server/logs/daily.log 2>&1
 # ============================================================================
 
 set -euo pipefail
