@@ -64,7 +64,19 @@ SEASON_YEAR="${SEASON_YEAR:-2026}"
 THF_DIR="$SCRIPT_DIR/thf-js"
 THF_ROSTER_CSV="$THF_DIR/$SEASON_YEAR-thf-rosters.csv"
 
-PYTHON="${PYTHON:-python3}"
+# Prefer the deep_dive venv interpreter. Its Homebrew OpenSSL build passes
+# Cloudflare on atlantichockey.org; the system python3 uses LibreSSL and gets a
+# 403 challenge for EVERY request ("Players scraped: 0"). The venv is also where
+# playwright/psycopg2 live.
+PYTHON="${PYTHON:-}"
+if [[ -z "$PYTHON" ]]; then
+    if [[ -x "$SCRIPT_DIR/deep_dive/.venv/bin/python" ]]; then
+        PYTHON="$SCRIPT_DIR/deep_dive/.venv/bin/python"
+    else
+        PYTHON="python3"
+    fi
+fi
+
 NODE="${NODE:-node}"
 
 echo ""

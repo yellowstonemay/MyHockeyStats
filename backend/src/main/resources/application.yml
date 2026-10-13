@@ -74,3 +74,11 @@ app:
     max-output-tokens: 2000
     price-input-per-m: 0.14        # USD per 1M input tokens (cache miss)
     price-output-per-m: 0.28       # USD per 1M output tokens
+  # Admin-only school assistant (MyRHScore/assistant). It runs as a sibling
+  # container named "school-assistant" on the compose network and publishes NO
+  # ports of its own, so the address must be the container name. This property
+  # MUST exist: SchoolAssistantController reads it with @Value, and without a
+  # matching key the env var is ignored and the built-in fallback
+  # (host.docker.internal - the Docker host, where nothing listens) is used.
+  school:
+    assistant-url: ${ASSISTANT_URL:http://school-assistant:8787}

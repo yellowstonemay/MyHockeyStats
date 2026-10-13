@@ -498,6 +498,15 @@ def main() -> None:
         checkpoint = {}
     completed: set[str] = set() if args.no_resume else load_progress(season_year)
 
+    # A progress file that already covers EVERY player means a previous run
+    # finished the whole list. Per-game stats change as the season progresses,
+    # so that set must NOT suppress the next refresh - start fresh. A partial
+    # set means a run was interrupted, so resume from it.
+    all_player_ids = {p["player_id"] for p in all_players}
+    if completed and all_player_ids and all_player_ids.issubset(completed):
+        print("Progress covers all players (previous run finished) - refreshing from scratch.")
+        completed = set()
+
     # ---- Database setup (unless dry-run) ------------------------------------
     conn = None
     if not args.dry_run:

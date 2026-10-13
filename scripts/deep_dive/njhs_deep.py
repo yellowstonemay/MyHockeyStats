@@ -42,14 +42,27 @@ CONFERENCES = ["Big North", "CVC", "GMC", "Gordon", "MCSSIHL", "NJIIHL", "Shore"
 
 
 def current_season_year() -> int:
-    """NJ HS hockey runs Dec-Mar. In Aug 2026 the latest completed season is
-    2025-2026 (year 2025); the next season starts Dec 2026 (year 2026)."""
+    """Current season start year — APRIL cutover, the same rule used by
+    ayhl_deep/thf_ahf_deep and by the Dashboard. From Apr 2026 onward the current
+    season is 2026-2027 (year 2026) even before the first game is played."""
     today = date.today()
-    return today.year if today.month >= 12 else today.year - 1
+    return today.year if today.month >= 4 else today.year - 1
 
 
 def season_label(year: int) -> str:
     return f"{year}-{year + 1}"
+
+
+def in_season_window(game_date: str | None, season_year: int) -> bool:
+    """A game belongs to season Y when it is played Apr Y -> Mar Y+1."""
+    if not game_date or len(game_date) < 7:
+        return False
+    try:
+        year = int(game_date[:4])
+        month = int(game_date[5:7])
+    except ValueError:
+        return False
+    return year == (season_year if month >= 4 else season_year + 1)
 
 
 def get_conn():
@@ -574,11 +587,22 @@ def scrape_player(conn, slug: str, season_year: int, all_seasons: bool = False,
     games = parse_game_log(soup)
     print(f"  {slug}: {name or '?'} school={school or '?'} seasons={len(career)} games={len(games)}")
 
-    # Career for the requested season, with games_played = this season's game log
+    # The source falls back to its LATEST season page when the requested season
+    # does not exist yet, and the game log then holds the OLD season's games —
+    # writing those under the new season_year invents duplicate history. Keep only
+    # games inside this season's window (Aug Y -> Jul Y+1) and skip the season
+    # entirely when the career table has no row for it either.
     season_stats = next((c for c in career if c["season_label"] == label), {})
-    upsert_career(conn, slug, name, school, label, season_year, len(games), season_stats, dry_run)
-    if games:
-        upsert_games(conn, slug, name, school, season_year, games, dry_run)
+    in_season = [g for g in games if in_season_window(g.get("game_date"), season_year)]
+    if len(in_season) != len(games):
+        print(f"    ignored {len(games) - len(in_season)} game(s) outside the {label} window "
+              f"(page looks like another season)")
+    if not season_stats and not in_season:
+        print(f"    {label}: not published on the source yet - skipping")
+        return None
+    upsert_career(conn, slug, name, school, label, season_year, len(in_season), season_stats, dry_run)
+    if in_season:
+        upsert_games(conn, slug, name, school, season_year, in_season, dry_run)
 
     if all_seasons:
         for c in career:
@@ -591,6 +615,9 @@ def scrape_player(conn, slug: str, season_year: int, all_seasons: bool = False,
                 print(f"    games[{c['season_label']}]: ERROR {e}")
                 continue
             cgames = parse_game_log(csoup)
+            # Same fallback guard as the current-season path: a season page can
+            # return another season's log, so filter by the game dates.
+            cgames = [g for g in cgames if in_season_window(g.get("game_date"), sy)]
             upsert_career(conn, slug, name, school, c["season_label"], sy, len(cgames), c, dry_run)
             if cgames:
                 upsert_games(conn, slug, name, school, sy, cgames, dry_run)

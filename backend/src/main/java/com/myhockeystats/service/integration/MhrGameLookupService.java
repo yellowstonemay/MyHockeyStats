@@ -42,7 +42,8 @@ public class MhrGameLookupService {
 
     /** One MHR game with any manual stats already applied. */
     public record MhrGame(Long profileId, String gameId, Integer seasonYear, LocalDate date,
-                          String teamFor, String opponent, Integer goals, Integer assists,
+                          String gameTime, String gameType, String league, String teamFor, String opponent,
+                          Integer goals, Integer assists,
                           Integer points, Integer pim, Integer scoreFor, Integer scoreAgainst,
                           boolean statsEdited) {}
 
@@ -75,12 +76,13 @@ public class MhrGameLookupService {
                 + canonicalNames.stream().map(n -> "?").collect(Collectors.joining(",")) + ")";
         }
 
-        String sql = "SELECT t.game_id, t.season_year, t.game_date, t.team_for, t.team_against,"
+        String sql = "SELECT t.game_id, t.season_year, t.game_date, t.game_time, t.game_type, t.league,"
+            + " t.team_for, t.team_against,"
             + " " + goalsColumn + " AS goals, " + assistsColumn + " AS assists, t.points AS scraped_points,"
             + " " + pimColumn + " AS pim, t.score_for, t.score_against, t.scraped_at" + editedColumn
             + " FROM " + TABLE + " t" + overrideJoin
             + " WHERE (t.player_id = ?" + nameClause + ") AND t.game_date IS NOT NULL"
-            + " ORDER BY t.game_date DESC, t.game_id DESC LIMIT " + limit;
+            + " ORDER BY t.game_date DESC, t.game_time DESC NULLS LAST, t.game_id DESC LIMIT " + limit;
         params.add(String.valueOf(profileId));
         params.addAll(canonicalNames);
 
@@ -103,6 +105,9 @@ public class MhrGameLookupService {
                 rs.getString("game_id"),
                 (Integer) rs.getObject("season_year"),
                 date == null ? null : date.toLocalDate(),
+                rs.getString("game_time"),
+                rs.getString("game_type"),
+                rs.getString("league"),
                 rs.getString("team_for"),
                 rs.getString("team_against"),
                 goals,

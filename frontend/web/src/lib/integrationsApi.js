@@ -63,6 +63,12 @@ export const integrationsApi = {
     )
   },
 
+  // MYHockeyRankings positions for the team(s) the player is linked to, per season
+  fetchMyMhrRankings(playerId) {
+    const qs = playerId ? `?playerId=${encodeURIComponent(playerId)}` : ''
+    return api.fetchWithAuth(`/players/me/mhr-rankings${qs}`)
+  },
+
   // Admin: all registered players (registration desc) with last login + deep-dive
   fetchAdminPlayers() {
     return api.fetchWithAuth('/admin/players')
@@ -253,11 +259,13 @@ export const integrationsApi = {
     })
   },
 
-  // Merged recent-games feed (one player + followed players) with freshness timestamp
-  fetchActivity(limit, playerId) {
+  // Recent-games feed. scope: 'mine' (your players only) | 'following' (followed
+  // players only) | omitted for both merged.
+  fetchActivity(limit, playerId, scope) {
     const params = new URLSearchParams()
     if (limit) params.set('limit', limit)
     if (playerId) params.set('playerId', playerId)
+    if (scope) params.set('scope', scope)
     const qs = params.toString() ? `?${params.toString()}` : ''
     return api.fetchWithAuth(`/follows/activity${qs}`)
   },

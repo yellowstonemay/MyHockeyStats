@@ -9,6 +9,7 @@ import com.myhockeystats.security.IntegrationAccessGuard;
 import com.myhockeystats.service.PlayerProfileService;
 import com.myhockeystats.service.integration.CareerLookupService;
 import com.myhockeystats.service.integration.GameHistoryLookupService;
+import com.myhockeystats.service.integration.MhrRankingLookupService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -53,6 +54,9 @@ public class SeasonsController {
 
     @Autowired
     private GameHistoryLookupService gameHistoryLookupService;
+
+    @Autowired
+    private MhrRankingLookupService mhrRankingLookupService;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -193,6 +197,50 @@ public class SeasonsController {
         return ResponseEntity.ok()
             .cacheControl(CacheControl.maxAge(300, TimeUnit.SECONDS).cachePrivate())
             .body(response);
+    }
+
+    /**
+     * GET /api/players/me/mhr-rankings
+     *
+     * MYHockeyRankings positions for the team(s) this player is linked to, per
+     * season, exactly as MHR publishes them on the team page (state / national /
+     * tier categories with a week-over-week trend). Empty until the MHR ingest has
+     * scraped the team page for the season.
+     */
+    @GetMapping("/me/mhr-rankings")
+    public ResponseEntity<?> getMyMhrRankings(
+        @RequestHeader(value = "Authorization", required = false) String authHeader,
+        @RequestParam(value = "playerId", required = false) Long playerId
+    ) {
+        String email = extractEmailFromAuthHeader(authHeader);
+        if (email == null) {
+            return ResponseEntity.status(401)
+                .body(new ErrorResponse("UNAUTHORIZED", "Authentication required."));
+        }
+
+        Optional<User> userOpt = userRepository.findByEmail(email);
+        if (userOpt.isEmpty()) {
+            return ResponseEntity.status(404)
+                .body(new ErrorResponse("USER_NOT_FOUND", "User not found."));
+        }
+
+        Optional<PlayerProfile> profileOpt = playerId == null
+            ? playerProfileService.getProfileByUserId(userOpt.get().getId())
+            : playerProfileService.isLinked(userOpt.get().getId(), playerId)
+                ? playerProfileService.getProfileById(playerId)
+                : Optional.empty();
+        if (profileOpt.isEmpty()) {
+            return ResponseEntity.status(404)
+                .body(new ErrorResponse("PLAYER_NOT_FOUND", "Player profile not found."));
+        }
+
+        PlayerProfile player = profileOpt.get();
+        return ResponseEntity.ok()
+            .cacheControl(CacheControl.maxAge(300, TimeUnit.SECONDS).cachePrivate())
+            .body(Map.of(
+                "playerId", String.valueOf(player.getId()),
+                "playerName", player.getFullName(),
+                "seasons", mhrRankingLookupService.rankingsForPlayer(player.getId())));
     }
 
     @GetMapping("/me/game-history")

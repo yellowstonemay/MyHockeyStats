@@ -2,14 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { integrationsApi } from '../lib/integrationsApi'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './Card'
 import { Loader2 } from 'lucide-react'
-
-const SOURCE_META = {
-  AYHL: { label: 'AYHL', color: 'bg-indigo-100 text-indigo-700' },
-  THF: { label: 'THF', color: 'bg-sky-100 text-sky-700' },
-  AHF: { label: 'AHF', color: 'bg-emerald-100 text-emerald-700' },
-  NJHS: { label: 'NJ HS', color: 'bg-amber-100 text-amber-700' },
-  MHR: { label: 'MHR', color: 'bg-rose-100 text-rose-700' },
-}
+import { leagueBadgeOfGame, sourceMeta } from '../lib/leagues'
 
 function timeAgo(iso) {
   if (!iso) return ''
@@ -23,6 +16,17 @@ function timeAgo(iso) {
   return `${Math.floor(hrs / 24)}d ago`
 }
 
+// "HH:MM" (24h, MHR only) -> "5:20 PM" for display.
+function formatTime(value) {
+  if (!value) return ''
+  const m = String(value).match(/^(\d{2}):(\d{2})$/)
+  if (!m) return ''
+  const hour = Number(m[1])
+  const suffix = hour >= 12 ? 'PM' : 'AM'
+  const h12 = hour % 12 === 0 ? 12 : hour % 12
+  return `${h12}:${m[2]} ${suffix}`
+}
+
 function highlightOf(g) {
   const goals = g.goals ?? 0
   const points = g.points ?? 0
@@ -33,17 +37,49 @@ function highlightOf(g) {
   return { label: 'Played', color: 'bg-slate-100 text-slate-500', dot: 'bg-slate-400' }
 }
 
-export default function ActivityFeed({ playerId }) {
+// MHR tags every row: a League Game is played inside the division's league,
+// while Non-League / Tournament games are the team's extras. It is the only
+// source that publishes both, so only its rows carry this chip.
+const MHR_GAME_TYPES = {
+  'League Game': 'League',
+  'Non-League Game': 'Non-League',
+  'Tournament Game': 'Tournament',
+}
+
+function gameTypeLabel(gameType) {
+  const value = String(gameType ?? '').trim()
+  if (!value) return ''
+  return MHR_GAME_TYPES[value] || value.replace(/\s*game$/i, '')
+}
+
+const COPY = {
+  mine: {
+    description: "Latest games for the player you're viewing",
+    empty: 'No recent games yet. Stats refresh with the daily deep-dive.',
+  },
+  following: {
+    description: 'Latest games for the players you follow',
+    empty: 'No recent games for the players you follow yet.',
+  },
+  all: {
+    description: 'Latest games for you and the players you follow',
+    empty: 'No recent games yet. Stats refresh with the daily deep-dive.',
+  },
+}
+
+export default function ActivityFeed({ playerId, scope = 'all', limit = 10 }) {
   const [entries, setEntries] = useState([])
   const [asOf, setAsOf] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
+  const copy = COPY[scope] || COPY.all
+
   const load = async () => {
     setLoading(true)
     setError('')
     try {
-      const resp = await integrationsApi.fetchActivity(10, playerId)
+      const resp = await integrationsApi.fetchActivity(limit, playerId, scope === 'all' ? undefined : scope)
       setEntries(resp.entries || [])
       setAsOf(resp.asOf || null)
     } catch (err) {
@@ -56,14 +92,14 @@ export default function ActivityFeed({ playerId }) {
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playerId])
+  }, [playerId, scope, limit])
 
   return (
     <Card>
       <CardHeader className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1">
         <div>
           <CardTitle>Recent Activity</CardTitle>
-          <CardDescription>Latest games for you and the players you follow</CardDescription>
+          <CardDescription>{copy.description}</CardDescription>
         </div>
         <div className="text-xs text-slate-400 whitespace-nowrap">
           {asOf ? `Updated ${timeAgo(asOf)}` : 'Refreshed daily at 9:00 AM'}
@@ -76,13 +112,13 @@ export default function ActivityFeed({ playerId }) {
             <Loader2 className="w-4 h-4 animate-spin mr-2" /> Loading activity...
           </div>
         ) : entries.length === 0 ? (
-          <p className="text-sm text-slate-500 text-center py-6">
-            No recent games yet. Stats refresh with the daily deep-dive.
-          </p>
+          <p className="text-sm text-slate-500 text-center py-6">{copy.empty}</p>
         ) : (
           <ul className="divide-y divide-slate-100">
             {entries.map((g, i) => {
-              const meta = SOURCE_META[g.source] || { label: g.source, color: 'bg-slate-100 text-slate-600' }
+              // A game from a team schedule (MHR) is badged with the league that
+              // runs it when the game itself is league play.
+              const meta = sourceMeta(leagueBadgeOfGame(g))
               const h = highlightOf(g)
               return (
                 <li key={i} className="py-2.5 flex items-center gap-3">
@@ -92,15 +128,26 @@ export default function ActivityFeed({ playerId }) {
                       <span className={`text-[11px] font-semibold px-1.5 py-0.5 rounded-full shrink-0 ${meta.color}`}>
                         {meta.label}
                       </span>
-                      <span className={`font-medium text-sm truncate ${g.isMe ? 'text-indigo-700' : 'text-slate-900'}`}>
-                        {g.isMe ? 'You' : g.playerName}
-                      </span>
-                      {g.isMe && (
-                        <span className="text-[10px] uppercase tracking-wide text-indigo-400 font-semibold shrink-0">you</span>
+                      {g.source === 'MHR' && gameTypeLabel(g.gameType) && (
+                        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-600 shrink-0">
+                          {gameTypeLabel(g.gameType)}
+                        </span>
+                      )}
+                      {/* The "mine" feed (Overview) is already scoped to the player you
+                          are viewing, so naming every row "You" says nothing. */}
+                      {scope !== 'mine' && (
+                        <>
+                          <span className={`font-medium text-sm truncate ${g.isMe ? 'text-indigo-700' : 'text-slate-900'}`}>
+                            {g.isMe ? 'You' : g.playerName}
+                          </span>
+                          {g.isMe && (
+                            <span className="text-[10px] uppercase tracking-wide text-indigo-400 font-semibold shrink-0">you</span>
+                          )}
+                        </>
                       )}
                     </div>
                     <div className="text-xs text-slate-500 truncate">
-                      {g.date || '—'} · {g.opponent || g.teamFor || 'game'}
+                      {g.date || '—'}{formatTime(g.time) ? ` ${formatTime(g.time)}` : ''} · {g.opponent || g.teamFor || 'game'}
                     </div>
                   </div>
                   <div className="text-right shrink-0">

@@ -132,6 +132,14 @@ public class RankingLookupService {
         }
         List<Map<String, Object>> out = new ArrayList<>();
         for (Map<String, Object> row : best.values()) {
+            // A season the sources have not published yet (a skeleton row: no games
+            // and no points) is ranked #1 by every partition purely because all of its
+            // columns are zero — a rank nobody earned. Leave those seasons out so the
+            // GUI does not advertise "#1 of 15, 99.9%" for an empty season.
+            if (num(row.get("games")) == 0 && num(row.get("points")) == 0
+                    && num(row.get("goals")) == 0 && num(row.get("assists")) == 0) {
+                continue;
+            }
             int leagueRank = row.get("league_rank") == null ? 0 : ((Number) row.get("league_rank")).intValue();
             int leagueSize = row.get("league_size") == null ? 0 : ((Number) row.get("league_size")).intValue();
             int teamRank = row.get("team_rank") == null ? 0 : ((Number) row.get("team_rank")).intValue();

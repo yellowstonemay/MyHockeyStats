@@ -2,7 +2,7 @@ import React from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../lib/AuthContext'
 import { Button } from './Button'
-import { Trophy, LogOut, Users, LayoutDashboard } from 'lucide-react'
+import { Trophy, LogOut, Users, LayoutDashboard, GraduationCap } from 'lucide-react'
 
 export default function Navigation() {
   const navigate = useNavigate()
@@ -35,6 +35,17 @@ export default function Navigation() {
               >
                 <Trophy className="w-5 h-5" />
                 <span className="hidden sm:inline">Admin</span>
+              </button>
+            )}
+            {user.isAdmin && (
+              <button
+                onClick={() => navigate('/ethan')}
+                title="Ethan's school assistant"
+                aria-label="Ethan's school assistant"
+                className="flex items-center space-x-2 text-slate-600 hover:text-slate-900 transition-colors"
+              >
+                <GraduationCap className="w-5 h-5" />
+                <span className="hidden sm:inline">Ethan</span>
               </button>
             )}
             <button

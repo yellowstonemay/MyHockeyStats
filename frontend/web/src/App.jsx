@@ -17,6 +17,7 @@ import ResetPassword from './pages/ResetPassword'
 import ParentPlayerHistoryPage from './pages/ParentPlayerHistoryPage'
 import IntegrationAdminPage from './pages/IntegrationAdminPage'
 import AdminPlayersPage from './pages/AdminPlayersPage'
+import SchoolAssistantPage from './pages/SchoolAssistantPage'
 
 function AppRoutes() {
   const location = useLocation()
@@ -82,6 +83,15 @@ function AppRoutes() {
           element={
             <ProtectedRoute>
               <AdminPlayersPage />
+            </ProtectedRoute>
+          }
+        />
+        {/* Admin-only: private school assistant (grades/assignments). */}
+        <Route
+          path="/ethan"
+          element={
+            <ProtectedRoute>
+              <SchoolAssistantPage />
             </ProtectedRoute>
           }
         />

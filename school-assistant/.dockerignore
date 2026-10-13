@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+data/
+assistant/assistant.db
+assistant/ai_usage.json
+assistant/__pycache__

@@ -446,16 +446,40 @@ def _roster_season_ids(conn) -> list[tuple[int, int]]:
     return sorted(out, key=lambda x: -x[0])
 
 
+def _in_season_window(game_date, season_year: int) -> bool:
+    """True when a game date really belongs to the season starting in `season_year`.
+
+    APRIL cutover — the same rule as current_season_year() and the other scrapers
+    (njhs_deep / thf_ahf_deep): a game belongs to season Y when it is played
+    Apr Y .. Mar Y+1.
+    """
+    if game_date is None:
+        return False
+    if isinstance(game_date, str):
+        try:
+            game_date = datetime.strptime(game_date[:10], "%Y-%m-%d").date()
+        except ValueError:
+            return False
+    if game_date.month >= 4:
+        return game_date.year == season_year
+    return game_date.year == season_year + 1
+
+
 def game_history(conn, pid: str, name: str, all_seasons: bool = False,
                  dry_run: bool = False) -> int:
     """Fetch + upsert game-by-game history for one AYHL player.
 
     The AYHL player page only renders its "Statistics By Game" table when given
     a seasonid, so we look the season ids up from ayhl_roster and fetch with
-    them. Default: the most recent season that has games (fallback: the current
-    season). --all-seasons: every season in ayhl_roster. Rows are UPSERTed on
-    (player_id, season_year, game_id) — existing rows are refreshed, never
-    deleted.
+    them. Default: the CURRENT season plus the most recent season we already
+    hold games for. --all-seasons: every season in ayhl_roster. Rows are
+    UPSERTed on (player_id, season_year, game_id) — existing rows are refreshed,
+    never deleted.
+
+    The current season must be requested explicitly. Resolving the default from
+    MAX(season_year) alone deadlocks: the max can never advance to a new season,
+    because no rows for that season exist yet to raise it, so a new season is
+    never discovered (AYHL 2026-27 was invisible for exactly this reason).
     """
     with conn.cursor() as cur:
         cur.execute("SELECT COALESCE(MAX(season_year), 0) FROM ayhl_player_games")
@@ -465,8 +489,11 @@ def game_history(conn, pid: str, name: str, all_seasons: bool = False,
     if all_seasons:
         targets = seasons
     else:
-        want = max_game_year if max_game_year else current_season_year()
-        targets = [(sy, sid) for sy, sid in seasons if sy == want]
+        want_years = {current_season_year()}
+        if max_game_year:
+            # Keep refreshing the most recent season we hold (late-added games).
+            want_years.add(max_game_year)
+        targets = [(sy, sid) for sy, sid in seasons if sy in want_years]
         if not targets and seasons:
             targets = seasons[:1]
 
@@ -481,6 +508,17 @@ def game_history(conn, pid: str, name: str, all_seasons: bool = False,
         if not games:
             print(f"    games[{season_year}-{season_year + 1}]: no game rows")
             continue
+        # atlantichockey.org renders the CURRENT season's "Statistics By Game"
+        # table whenever the requested season has no games, so trusting the
+        # request files the same game under every stale season (this happened
+        # for 11 seasons at once). Keep only games inside this season's window.
+        kept = [g for g in games if _in_season_window(g.get("game_date"), season_year)]
+        if len(kept) != len(games):
+            print(f"    games[{season_year}-{season_year + 1}]: "
+                  f"dropped {len(games) - len(kept)} row(s) dated outside this season")
+        games = kept
+        if not games:
+            continue
         if dry_run:
             print(f"    games[{season_year}-{season_year + 1}]: {len(games)} row(s) (dry-run)")
             total += len(games)
@@ -489,6 +527,87 @@ def game_history(conn, pid: str, name: str, all_seasons: bool = False,
             print(f"    games[{season_year}-{season_year + 1}]: upserted {len(games)} row(s)")
             total += len(games)
     return total
+
+
+def derive_career_from_games(conn, pid: str, name: str, dry_run: bool = False) -> int:
+    """Fill career rows that have NO source stats from the game rows we hold.
+
+    atlantichockey.org sits behind Cloudflare, so the player page often comes
+    back as a challenge (the parser then sees 0 tables) even though
+    ayhl_player_games already has that player's games. GP and G/A/P/PIM are just
+    sums of those game rows, so derive them instead of leaving the season blank.
+
+    Only rows with games_played IS NULL are touched — a scraped value (or a
+    user-edited row) is never overwritten. Returns the number of rows filled.
+    """
+    with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+        cur.execute(
+            """SELECT season_year,
+                      COUNT(*)                    AS gp,
+                      COALESCE(SUM(goals), 0)     AS goals,
+                      COALESCE(SUM(assists), 0)   AS assists,
+                      COALESCE(SUM(points), 0)    AS points,
+                      COALESCE(SUM(pim), 0)       AS pim
+               FROM ayhl_player_games
+               WHERE player_id = %s AND season_year IS NOT NULL
+               GROUP BY season_year ORDER BY season_year""",
+            (pid,),
+        )
+        seasons = [dict(r) for r in cur.fetchall()]
+
+    filled = 0
+    for row in seasons:
+        year = row["season_year"]
+        label = season_label_for(year)
+        with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+            cur.execute(
+                "SELECT games_played, team_name, jersey_number, is_user_modified "
+                "FROM ayhl_player_career WHERE source_player_id = %s AND season_label = %s",
+                (pid, label),
+            )
+            old = cur.fetchone()
+            if old and (old["games_played"] is not None or old["is_user_modified"]):
+                continue  # source (or the user) already has numbers for this season
+            if dry_run:
+                print(f"    derived[{label}]: GP={row['gp']} G={row['goals']} A={row['assists']} "
+                      f"P={row['points']} PIM={row['pim']} (dry-run)")
+                filled += 1
+                continue
+            team = old["team_name"] if old else None
+            if not team:
+                cur.execute(
+                    "SELECT team_for FROM ayhl_player_games "
+                    "WHERE player_id = %s AND season_year = %s AND team_for IS NOT NULL "
+                    "ORDER BY game_date DESC LIMIT 1",
+                    (pid, year),
+                )
+                t = cur.fetchone()
+                team = t["team_for"] if t else None
+            cur.execute(
+                """INSERT INTO ayhl_player_career
+                   (id, source_player_id, player_name, season_label, league_name,
+                    team_name, jersey_number, games_played, goals, assists, points,
+                    pim, last_scraped_at, created_at, updated_at)
+                   VALUES (gen_random_uuid(), %s, %s, %s, 'AYHL', %s, %s, %s, %s, %s, %s, %s, NOW(), NOW(), NOW())
+                   ON CONFLICT (source_player_id, season_label) DO UPDATE SET
+                     games_played = EXCLUDED.games_played,
+                     goals = EXCLUDED.goals,
+                     assists = EXCLUDED.assists,
+                     points = EXCLUDED.points,
+                     pim = EXCLUDED.pim,
+                     team_name = COALESCE(ayhl_player_career.team_name, EXCLUDED.team_name),
+                     jersey_number = COALESCE(ayhl_player_career.jersey_number, EXCLUDED.jersey_number),
+                     last_scraped_at = EXCLUDED.last_scraped_at,
+                     updated_at = NOW()""",
+                (pid, name or "N/A", label, team,
+                 old["jersey_number"] if old else None,
+                 row["gp"], row["goals"], row["assists"], row["points"], row["pim"]),
+            )
+        filled += 1
+    if filled and not dry_run:
+        conn.commit()
+        print(f"    derived[{pid}]: filled {filled} season row(s) from game data")
+    return filled
 
 
 def create_skeletons(conn, pid: str, name: str, all_seasons: bool = False) -> int:
@@ -555,6 +674,8 @@ def main() -> None:
             return
         print(f"Deep-diving {len(players)} AYHL player(s)...")
         for pid, _label in players:
+            entry = None
+            ok = True
             try:
                 soup = fetch_player_page(pid)
                 entry = parse_player(soup, pid)
@@ -565,25 +686,32 @@ def main() -> None:
                 if args.dry_run:
                     for cells in entry["rows"]:
                         print("    ", cells)
-                    continue
-                changes = upsert_career(conn, entry, all_seasons=args.all_seasons)
-                skeletons = create_skeletons(conn, pid, entry["name"], all_seasons=args.all_seasons)
-                if changes:
-                    print(f"    -> {len(changes)} change(s) detected & logged")
                 else:
-                    print("    -> no stat changes")
-                if skeletons:
-                    print(f"    -> created {skeletons} skeleton season(s) (empty stats, user-editable)")
-                # Game-by-game history (upsert into ayhl_player_games)
-                game_history(conn, pid, entry["name"],
-                             all_seasons=args.all_seasons, dry_run=args.dry_run)
+                    changes = upsert_career(conn, entry, all_seasons=args.all_seasons)
+                    skeletons = create_skeletons(conn, pid, entry["name"], all_seasons=args.all_seasons)
+                    if changes:
+                        print(f"    -> {len(changes)} change(s) detected & logged")
+                    else:
+                        print("    -> no stat changes")
+                    if skeletons:
+                        print(f"    -> created {skeletons} skeleton season(s) (empty stats, user-editable)")
+                    # Game-by-game history (upsert into ayhl_player_games)
+                    game_history(conn, pid, entry["name"],
+                                 all_seasons=args.all_seasons, dry_run=False)
             except Exception as e:
                 print(f"  {pid}: ERROR {e}")
-                if not args.dry_run:
-                    deep_dive_status.record_outcome(conn, "AYHL", pid, ok=False, error=e)
-                continue
+                ok = False
+            # Runs even when the page was blocked by Cloudflare: fill any career
+            # row that still has NO stats from the game rows we hold.
+            try:
+                derived = derive_career_from_games(conn, pid, (entry or {}).get("name", ""),
+                                                   dry_run=args.dry_run)
+                if derived and args.dry_run:
+                    print(f"    -> would derive {derived} season row(s) from game data")
+            except Exception as e:
+                print(f"    (derive from games failed: {e})")
             if not args.dry_run:
-                deep_dive_status.record_outcome(conn, "AYHL", pid, ok=True)
+                deep_dive_status.record_outcome(conn, "AYHL", pid, ok=ok, error=None if ok else "see log")
     finally:
         conn.close()
 

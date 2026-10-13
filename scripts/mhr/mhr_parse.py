@@ -47,8 +47,10 @@ _TEAM_RE = re.compile(r"team-info")
 _GAME_RE = re.compile(r"game[-_]preview(?:\.php)?\?[^\"']*?g=(\d+)")
 _TEAM_ID_RE = re.compile(r"team-info\?[^\"']*?t=(\d+)")
 _DIVISION_RE = re.compile(r"division-info")
+_RANK_RE = re.compile(r"rank", re.IGNORECASE)
 _SEASON_TOTALS_RE = re.compile(r"Season Totals for the (.+?)\s*$", re.MULTILINE)
 _DATE_RE = re.compile(r"([A-Za-z]{3})\w*\s+(\d{1,2})")
+_TIME_RE = re.compile(r"\b(\d{1,2}):(\d{2})\s*([ap]m)\b", re.IGNORECASE)
 _SCORE_RE = re.compile(r"(\d{1,3})\s*-\s*(\d{1,3})")
 
 _MONTHS = {
@@ -108,11 +110,24 @@ def club_tokens(name: str) -> set[str]:
 def infer_season_date(season_year: int, month: int, day: int) -> date:
     """MHR game lists show "Sep 12" without a year.
 
-    A season runs Aug -> Jul, so Aug-Dec belong to the season start year and
-    Jan-Jul to the following calendar year.
+    APRIL cutover: a season runs Apr Y -> Mar Y+1, so Apr-Dec belong to the
+    season start year and Jan-Mar to the following calendar year.
     """
-    year = season_year if month >= 8 else season_year + 1
+    year = season_year if month >= 4 else season_year + 1
     return date(year, month, day)
+
+
+def _parse_time_text(value: str) -> str | None:
+    """"Oct 11 10:40 am" -> "10:40" (24h, sortable). None when absent."""
+    match = _TIME_RE.search(value or "")
+    if not match:
+        return None
+    hour, minute, meridiem = int(match.group(1)), int(match.group(2)), match.group(3).lower()
+    if meridiem == "pm" and hour != 12:
+        hour += 12
+    elif meridiem == "am" and hour == 12:
+        hour = 0
+    return "%02d:%02d" % (hour, minute)
 
 
 def game_type_for_marker(marker: str) -> str:
@@ -212,9 +227,73 @@ def parse_division_name(soup: BeautifulSoup) -> str | None:
     return _text(link) if link else None
 
 
+# -- team rankings ---------------------------------------------------------
+# The team page's "Rankings" card lists the team's position in every category
+# MHR ranks it in (state / national / tier), each with a week-over-week arrow:
+#
+#     Rankings
+#     ▼ 16th   New Jersey 16U
+#     ▼ 50th   USA 15U Tier 1
+#
+# Nothing here is per player, so it is stored per TEAM and read back for
+# whichever player is linked to that team.
+_RANK_DIGITS_RE = re.compile(r"(\d+)")
+_TREND_LABELS = {
+    "\u25b2": "up",    # black up-pointing triangle
+    "\u25bc": "down",  # black down-pointing triangle
+    "\u25ac": "flat",  # black rectangle
+    "\u2013": "flat",
+    "-": "flat",
+}
+
+
+def _parse_rank_entry(item) -> dict | None:
+    """One ``<li>`` of the Rankings card -> ``{category, rank, trend, url}``."""
+    strong = item.find("strong")
+    link = item.find("a", href=_RANK_RE) or item.find("a", href=True)
+    if strong is None or link is None:
+        return None
+    match = _RANK_DIGITS_RE.search(_text(strong))
+    if not match:
+        return None
+    trend = None
+    for span in item.find_all("span"):
+        value = _TREND_LABELS.get(_text(span))
+        if value:
+            trend = value
+            break
+    return {
+        "category": _text(link),
+        "rank": int(match.group(1)),
+        "trend": trend,
+        "url": link.get("href"),
+    }
+
+
+def parse_team_rankings(html) -> list[dict]:
+    """Every rank on the team page, in page order (empty when unpublished)."""
+    soup = html if isinstance(html, BeautifulSoup) else BeautifulSoup(html, "html.parser")
+    heading = next((h for h in soup.find_all("h3") if _text(h) == "Rankings"), None)
+    if heading is None:
+        return []
+    node = heading.parent
+    for _ in range(5):  # the card is the nearest ancestor that holds the <ul>
+        if node is None:
+            break
+        for ul in node.find_all("ul"):
+            items = [
+                item for item in ul.find_all("li", recursive=False)
+                if item.find("strong") and item.find("a")
+            ]
+            if items:
+                return [entry for entry in (_parse_rank_entry(i) for i in items) if entry]
+        node = node.parent
+    return []
+
+
 def parse_team_page(html: str, season_year: int, team_id: str | int,
                     team_name: str | None = None) -> dict:
-    """Parse a team schedule page into ``{team_name, division, games}``."""
+    """Parse a team schedule page into ``{team_name, division, rankings, games}``."""
     soup = BeautifulSoup(html, "html.parser")
     scores_body = soup.find(id="scores-body")
     if scores_body is None:
@@ -263,9 +342,19 @@ def parse_team_page(html: str, season_year: int, team_id: str | int,
                 score_for, score_against = values
 
         rink_link = row.find("a", href=_RINK_RE)
+        # The date cell carries the start time ("Oct 11 10:40 am"); the LiveBarn
+        # link repeats it as /<date>/<HH:MM> and is the fallback.
+        game_time = _parse_time_text(cell_text)
+        if game_time is None:
+            for link in row.find_all("a", href=True):
+                parsed = _parse_time_text(link["href"].replace("/", " "))
+                if parsed:
+                    game_time = parsed
+                    break
         games.append({
             "game_id": game_id,
             "game_date": game_date,
+            "game_time": game_time,
             "game_type": game_type,
             "is_league": is_league_game(game_type),
             "played": score_for != UNPLAYED_SCORE,
@@ -277,4 +366,5 @@ def parse_team_page(html: str, season_year: int, team_id: str | int,
             "rink": _text(rink_link) if rink_link else None,
         })
 
-    return {"team_name": resolved_name, "division": division, "games": games}
+    return {"team_name": resolved_name, "division": division,
+            "rankings": parse_team_rankings(soup), "games": games}

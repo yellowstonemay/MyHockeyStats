@@ -36,6 +36,9 @@ services:
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       APP_AI_DAILY_CAP_USD: ${APP_AI_DAILY_CAP_USD:-0.20}
       APP_AI_WEEKLY_PER_USER: ${APP_AI_WEEKLY_PER_USER:-1}
+      # Private school assistant (admin-only /ethan page). Reached over the compose
+      # network - the assistant publishes no ports of its own.
+      ASSISTANT_URL: ${ASSISTANT_URL:-http://school-assistant:8787}
       # Social sign-in (Google / Facebook). Set these in .env on the host.
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
@@ -68,6 +71,22 @@ services:
       - "80:80"
     depends_on:
       - backend
+
+  # Private school assistant (MyRHScore/assistant): the admin-only /ethan page.
+  # No published ports - only the backend reaches it, and only for admin logins.
+  # The database is synced from the laptop that runs the Genesis scrape.
+  school-assistant:
+    build: ./school-assistant
+    container_name: school-assistant
+    restart: always
+    environment:
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      ASSISTANT_MODEL: ${ASSISTANT_MODEL:-deepseek-v4-flash}
+      ASSISTANT_DAILY_CAP_USD: ${ASSISTANT_DAILY_CAP_USD:-0.50}
+      # Keep the "data as of" maths in local time (the image is UTC by default).
+      TZ: ${TZ:-America/New_York}
+    volumes:
+      - ./school-assistant/data:/data
 
   # Optional: Expose through Cloudflare Tunnel
   # Uncomment after running: cloudflared tunnel login && cloudflared tunnel create myhockeystats

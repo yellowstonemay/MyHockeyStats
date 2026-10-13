@@ -5,10 +5,11 @@ import { AlertCircle, Loader2, RefreshCw, MessageSquare } from 'lucide-react'
 import { integrationsApi } from '../lib/integrationsApi'
 import SeasonsTab from '../components/PlayerProfile/SeasonsTab'
 import StatisticsTab from '../components/StatisticsTab'
-import MyLeagues from '../components/MyLeagues'
+import MhrRankings from '../components/MhrRankings'
 import FollowingTab from '../components/FollowingTab'
 import ActivityFeed from '../components/ActivityFeed'
 import ReportTab from '../components/ReportTab'
+import { careerRowHasStats, isLeaguePlay, leagueOfGame, sourceMeta, sourceOrder } from '../lib/leagues'
 
 const DASH_TABS = [
   { id: 'overview', label: 'Overview', short: 'Home', icon: '📊' },
@@ -21,12 +22,45 @@ const DASH_TABS = [
 
 const SUPPORT_CATEGORIES = ['Incorrect data', 'Missing season', 'Wrong player link', 'Other']
 
+function sumStats(records) {
+  return records.reduce(
+    (acc, r) => ({
+      games: acc.games + (r.gamesPlayed ?? 0),
+      goals: acc.goals + (r.goals ?? 0),
+      assists: acc.assists + (r.assists ?? 0),
+      points: acc.points + (r.points ?? 0),
+    }),
+    { games: 0, goals: 0, assists: 0, points: 0 }
+  )
+}
+
+// "2026-2027 Season" / "2025-2026" -> "2026-27" / "2025-26" for compact display.
+function shortSeason(seasonValue) {
+  const m = String(seasonValue ?? '').match(/(\d{4})\D+(\d{4})/)
+  return m ? `${m[1]}-${m[2].slice(2)}` : String(seasonValue ?? '')
+}
+
+// A season belongs to the calendar year it starts in, and the cutover is APRIL —
+// the same rule every scraper uses (ayhl_deep / thf_ahf_deep / njhs_deep). From
+// April onward "current" is the season starting this year (Oct 2026 -> 2026-27).
+// Anything older is a finished season: NJ HS 2025-26 ended in March and must NOT
+// be added into the current-season card.
+const SEASON_CUTOVER_MONTH = 4 // April
+
+function currentSeasonYear(now = new Date()) {
+  return now.getMonth() + 1 >= SEASON_CUTOVER_MONTH ? now.getFullYear() : now.getFullYear() - 1
+}
+
+// Display order + badge colour + the league rules live in ../lib/leagues so the
+// activity feed and the rankings card label games the same way.
+
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState('overview')
   const [players, setPlayers] = useState([])
   const [playersReady, setPlayersReady] = useState(false)
   const [selectedPlayerId, setSelectedPlayerId] = useState('')
   const [seasonRecords, setSeasonRecords] = useState([])
+  const [currentSeasonGames, setCurrentSeasonGames] = useState([])
   const [seasonsLoading, setSeasonsLoading] = useState(false)
   const [seasonsError, setSeasonsError] = useState('')
   const [editingKey, setEditingKey] = useState(null)
@@ -74,17 +108,89 @@ export default function Dashboard() {
     })
   }, [seasonRecords])
 
-  const careerTotals = useMemo(() => {
-    return seasonRecords.reduce(
-      (acc, r) => ({
-        games: acc.games + (r.gamesPlayed ?? 0),
-        goals: acc.goals + (r.goals ?? 0),
-        assists: acc.assists + (r.assists ?? 0),
-        points: acc.points + (r.points ?? 0),
-      }),
-      { games: 0, goals: 0, assists: 0, points: 0 }
-    )
-  }, [seasonRecords])
+  // Career totals — only used by the "Totals by League" footer now.
+  const careerTotals = useMemo(() => sumStats(seasonRecords), [seasonRecords])
+
+  // The Overview card shows the CURRENT season only (career totals live in the
+  // Statistics tab). "Current" is the calendar season: the one whose start year
+  // matches currentSeasonYear(), for every league. A league that has not been
+  // scraped for the new season yet simply contributes 0 instead of leaking its
+  // finished season into the totals.
+  const currentSeasonYearValue = currentSeasonYear()
+  const currentSeasonRecords = useMemo(() => {
+    return seasonRecords.filter((record) => getSeasonStartYear(record.season) === currentSeasonYearValue)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seasonRecords, currentSeasonYearValue])
+
+  // The Overview card shows ONE ROW PER LEAGUE instead of a combined total, and
+  // MHR is the only source that publishes a whole TEAM schedule (all of it is
+  // imported). So the rule is simply:
+  //   • the league keeps its own record for the season (career numbers or its own
+  //     game list, e.g. AYHL for Ethan Yan) -> the league row shows that record and
+  //     MHR only adds the games the league does not track: non-league & tournaments;
+  //   • the league published nothing for the player (e.g. Paden Zhou, whose AYHL
+  //     11U AAA season has no stats) -> MHR's LEAGUE games fill the league row and
+  //     its non-league/tournament games stay in the MHR row.
+  const currentSeasonRows = useMemo(() => {
+    const rows = new Map()
+
+    // 1. Every league's own record for the season (one row per league). A skeleton
+    //    row (all zero / empty) means "published nothing", not a real 0, so its
+    //    stats read "—" until the league or MHR supplies games.
+    const ownGames = new Map()
+    currentSeasonRecords.forEach((record) => {
+      const source = record.source || 'Unknown'
+      const row = rows.get(source) || {
+        source,
+        season: record.season,
+        games: 0,
+        goals: 0,
+        assists: 0,
+        points: 0,
+        statsKnown: careerRowHasStats(record),
+      }
+      row.games += record.gamesPlayed ?? 0
+      row.goals += record.goals ?? 0
+      row.assists += record.assists ?? 0
+      row.points += record.points ?? 0
+      if (!row.season && record.season) row.season = record.season
+      ownGames.set(source, (ownGames.get(source) ?? 0) + (record.gamesPlayed ?? 0))
+      rows.set(source, row)
+    })
+    // A league also has its own history when it ships a game list without a career row.
+    currentSeasonGames.forEach((game) => {
+      const source = game.source || 'Unknown'
+      if (source !== 'MHR') ownGames.set(source, (ownGames.get(source) ?? 0) + 1)
+    })
+    const leagueHasOwnHistory = (league) => (ownGames.get(league) ?? 0) > 0
+
+    // 2. The game rows: they fill a league row the league itself did not publish,
+    //    and give MHR's non-league / tournament games their own row.
+    currentSeasonGames.forEach((game) => {
+      let source
+      if (game.source === 'MHR') {
+        const league = leagueOfGame(game)
+        const belongsToLeague = league !== 'MHR' && isLeaguePlay(game.gameType) && !leagueHasOwnHistory(league)
+        source = belongsToLeague ? league : 'MHR'
+      } else {
+        source = game.source || 'Unknown'
+        // The league's own game list: skip it when the career row already counts it.
+        if ((rows.get(source)?.games ?? 0) > 0) return
+      }
+      const row = rows.get(source) || {
+        source, season: game.seasonLabel || '', games: 0, goals: 0, assists: 0, points: 0, statsKnown: false,
+      }
+      row.games += 1
+      if (game.goals != null || game.assists != null || game.points != null) {
+        row.statsKnown = true
+        row.goals += game.goals ?? 0
+        row.assists += game.assists ?? 0
+        row.points += game.points ?? 0
+      }
+      rows.set(source, row)
+    })
+    return [...rows.values()].sort((a, b) => sourceOrder(a.source) - sourceOrder(b.source))
+  }, [currentSeasonRecords, currentSeasonGames])
 
   const totalsByLeague = useMemo(() => {
     const map = {}
@@ -128,12 +234,25 @@ export default function Dashboard() {
 
   // The selected player drives every tab, so reload the career numbers whenever
   // it changes — dropping the previous player's rows so nothing stale is shown.
+  // Current-season game rows: they carry the leagues that have no career table
+  // (MHR) and keep the split honest when a career row is missing.
+  const loadCurrentGames = async (playerId = selectedPlayerId) => {
+    try {
+      const response = await integrationsApi.fetchMyGameHistory(currentSeasonYear(), playerId)
+      setCurrentSeasonGames(response.games || [])
+    } catch {
+      setCurrentSeasonGames([]) // the split then falls back to career rows only
+    }
+  }
+
   useEffect(() => {
     if (!playersReady) return
     setEditingKey(null)
     setEditValues({})
     setSeasonRecords([])
+    setCurrentSeasonGames([])
     loadSeasons(selectedPlayerId)
+    loadCurrentGames(selectedPlayerId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playersReady, selectedPlayerId])
 
@@ -266,7 +385,7 @@ export default function Dashboard() {
                     <div>
                       <CardTitle>Welcome Back!</CardTitle>
                       <CardDescription>
-                        {selectedPlayer ? `${selectedPlayer.fullName}'s hockey stats overview` : "Here's your hockey stats overview"}
+                        {selectedPlayer ? `${selectedPlayer.fullName}'s` : 'Your'} current season by league
                       </CardDescription>
                     </div>
                   </CardHeader>
@@ -274,91 +393,72 @@ export default function Dashboard() {
                     {seasonsLoading && (
                       <div className="flex items-center justify-center py-6 text-slate-500">
                         <Loader2 className="w-5 h-5 animate-spin mr-2" />
-                        <span>Loading career stats…</span>
+                        <span>Loading season stats…</span>
                       </div>
                     )}
                     {!seasonsLoading && (
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                        <div className="bg-gradient-to-br from-primary-50 to-primary-100 rounded-lg p-4">
-                          <div className="text-3xl font-bold text-primary-600">{careerTotals.games}</div>
-                          <p className="text-sm text-slate-600 mt-1">Total Games</p>
-                        </div>
-                        <div className="bg-gradient-to-br from-secondary-50 to-secondary-100 rounded-lg p-4">
-                          <div className="text-3xl font-bold text-secondary-600">{careerTotals.goals}</div>
-                          <p className="text-sm text-slate-600 mt-1">Total Goals</p>
-                        </div>
-                        <div className="bg-gradient-to-br from-amber-50 to-amber-100 rounded-lg p-4">
-                          <div className="text-3xl font-bold text-amber-600">{careerTotals.assists}</div>
-                          <p className="text-sm text-slate-600 mt-1">Total Assists</p>
-                        </div>
-                        <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-lg p-4">
-                          <div className="text-3xl font-bold text-green-600">{careerTotals.points}</div>
-                          <p className="text-sm text-slate-600 mt-1">Total Points</p>
-                        </div>
-                      </div>
+                      <>
+                        {currentSeasonRows.length === 0 ? (
+                          <p className="text-sm text-slate-500">
+                            No games logged for the current season yet — earlier seasons are in the Seasons tab.
+                          </p>
+                        ) : (
+                          <div className="space-y-5">
+                            {currentSeasonRows.map((row) => {
+                              const meta = sourceMeta(row.source)
+                              return (
+                                <div key={row.source}>
+                                  <div className="flex items-center gap-2 mb-2">
+                                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${meta.color}`}>
+                                      {meta.label}
+                                    </span>
+                                    {meta.note && (
+                                      <span className="text-[11px] text-slate-400">{meta.note}</span>
+                                    )}
+                                    {row.season && (
+                                      <span className="text-[11px] text-slate-400">{shortSeason(row.season)}</span>
+                                    )}
+                                  </div>
+                                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                    <div className="bg-gradient-to-br from-primary-50 to-primary-100 rounded-lg p-4">
+                                      <div className="text-3xl font-bold text-primary-600">{row.games}</div>
+                                      <p className="text-sm text-slate-600 mt-1">Games</p>
+                                    </div>
+                                    <div className="bg-gradient-to-br from-secondary-50 to-secondary-100 rounded-lg p-4">
+                                      <div className="text-3xl font-bold text-secondary-600">{row.statsKnown ? row.goals : '—'}</div>
+                                      <p className="text-sm text-slate-600 mt-1">Goals</p>
+                                    </div>
+                                    <div className="bg-gradient-to-br from-amber-50 to-amber-100 rounded-lg p-4">
+                                      <div className="text-3xl font-bold text-amber-600">{row.statsKnown ? row.assists : '—'}</div>
+                                      <p className="text-sm text-slate-600 mt-1">Assists</p>
+                                    </div>
+                                    <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-lg p-4">
+                                      <div className="text-3xl font-bold text-green-600">{row.statsKnown ? row.points : '—'}</div>
+                                      <p className="text-sm text-slate-600 mt-1">Points</p>
+                                    </div>
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )}
+                        {currentSeasonRows.some((r) => !r.statsKnown) && (
+                          <p className="text-[11px] text-slate-400 mt-2">
+                            “—” means that league publishes no per-player scoring for these games — they come
+                            from the team schedule, so only the game count is known.
+                          </p>
+                        )}
+                        <p className="text-xs text-slate-500 mt-3">
+                          Career totals are in the Statistics tab; every season is in the Seasons tab.
+                        </p>
+                      </>
                     )}
                   </CardContent>
                 </Card>
 
-                <ActivityFeed playerId={selectedPlayerId} />
+                <ActivityFeed playerId={selectedPlayerId} scope="mine" limit={20} />
 
-                <MyLeagues playerId={selectedPlayerId} onViewReport={() => setActiveTab('report')} />
-
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Totals by League</CardTitle>
-                    <CardDescription>Career statistics broken down by league</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    {seasonsLoading && (
-                      <div className="flex items-center justify-center py-4 text-slate-500">
-                        <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                        <span>Loading…</span>
-                      </div>
-                    )}
-                    {!seasonsLoading && totalsByLeague.length === 0 && (
-                      <p className="text-slate-500 text-sm text-center py-4">No league data available yet.</p>
-                    )}
-                    {!seasonsLoading && totalsByLeague.length > 0 && (
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-sm border border-slate-200 rounded-lg overflow-hidden">
-                          <thead className="bg-slate-100 text-slate-700">
-                            <tr>
-                              <th className="px-3 py-2 text-left">League</th>
-                              <th className="px-3 py-2 text-right">Seasons</th>
-                              <th className="px-3 py-2 text-right">GP</th>
-                              <th className="px-3 py-2 text-right">G</th>
-                              <th className="px-3 py-2 text-right">A</th>
-                              <th className="px-3 py-2 text-right">PTS</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {totalsByLeague.map((row) => (
-                              <tr key={row.league} className="border-t border-slate-200 hover:bg-slate-50">
-                                <td className="px-3 py-2 font-medium">{row.league}</td>
-                                <td className="px-3 py-2 text-right">{row.seasons}</td>
-                                <td className="px-3 py-2 text-right">{row.games}</td>
-                                <td className="px-3 py-2 text-right">{row.goals}</td>
-                                <td className="px-3 py-2 text-right">{row.assists}</td>
-                                <td className="px-3 py-2 text-right font-semibold text-primary-700">{row.points}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                          <tfoot className="bg-slate-50 text-slate-700 font-semibold border-t-2 border-slate-300">
-                            <tr>
-                              <td className="px-3 py-2">Total</td>
-                              <td className="px-3 py-2 text-right">{totalsByLeague.reduce((s, r) => s + r.seasons, 0)}</td>
-                              <td className="px-3 py-2 text-right">{careerTotals.games}</td>
-                              <td className="px-3 py-2 text-right">{careerTotals.goals}</td>
-                              <td className="px-3 py-2 text-right">{careerTotals.assists}</td>
-                              <td className="px-3 py-2 text-right text-primary-700">{careerTotals.points}</td>
-                            </tr>
-                          </tfoot>
-                        </table>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
+                <MhrRankings playerId={selectedPlayerId} />
 
                 <Card>
                   <CardHeader>
@@ -496,6 +596,64 @@ export default function Dashboard() {
                             )
                           })}
                         </tbody>
+                      </table>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
+            {activeTab === 'seasons' && (
+              <Card className="mt-6">
+                <CardHeader>
+                  <CardTitle>Totals by League</CardTitle>
+                  <CardDescription>Career statistics broken down by league</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {seasonsLoading && (
+                    <div className="flex items-center justify-center py-4 text-slate-500">
+                      <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                      <span>Loading…</span>
+                    </div>
+                  )}
+                  {!seasonsLoading && totalsByLeague.length === 0 && (
+                    <p className="text-slate-500 text-sm text-center py-4">No league data available yet.</p>
+                  )}
+                  {!seasonsLoading && totalsByLeague.length > 0 && (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm border border-slate-200 rounded-lg overflow-hidden">
+                        <thead className="bg-slate-100 text-slate-700">
+                          <tr>
+                            <th className="px-3 py-2 text-left">League</th>
+                            <th className="px-3 py-2 text-right">Seasons</th>
+                            <th className="px-3 py-2 text-right">GP</th>
+                            <th className="px-3 py-2 text-right">G</th>
+                            <th className="px-3 py-2 text-right">A</th>
+                            <th className="px-3 py-2 text-right">PTS</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {totalsByLeague.map((row) => (
+                            <tr key={row.league} className="border-t border-slate-200 hover:bg-slate-50">
+                              <td className="px-3 py-2 font-medium">{row.league}</td>
+                              <td className="px-3 py-2 text-right">{row.seasons}</td>
+                              <td className="px-3 py-2 text-right">{row.games}</td>
+                              <td className="px-3 py-2 text-right">{row.goals}</td>
+                              <td className="px-3 py-2 text-right">{row.assists}</td>
+                              <td className="px-3 py-2 text-right font-semibold text-primary-700">{row.points}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot className="bg-slate-50 text-slate-700 font-semibold border-t-2 border-slate-300">
+                          <tr>
+                            <td className="px-3 py-2">Total</td>
+                            <td className="px-3 py-2 text-right">{totalsByLeague.reduce((s, r) => s + r.seasons, 0)}</td>
+                            <td className="px-3 py-2 text-right">{careerTotals.games}</td>
+                            <td className="px-3 py-2 text-right">{careerTotals.goals}</td>
+                            <td className="px-3 py-2 text-right">{careerTotals.assists}</td>
+                            <td className="px-3 py-2 text-right text-primary-700">{careerTotals.points}</td>
+                          </tr>
+                        </tfoot>
                       </table>
                     </div>
                   )}

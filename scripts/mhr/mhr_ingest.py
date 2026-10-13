@@ -6,12 +6,18 @@ linked to in ``mhr_team_links`` (see :mod:`mhr_resolve`).  Rows are keyed by
 ``player_id = player_profiles.id`` so two siblings can never collide on the
 ``UNIQUE (player_id, season_year, game_id)`` constraint.
 
+The same page also carries the team's **Rankings** card (its position in every
+MHR category: state, national, tier), which is stored per team in
+``mhr_team_rankings`` — that is the only place the site gets an outside ranking.
+
 MHR carries no per-player stats, so goals/assists/points/pim stay NULL and the
 team score is stored in ``score_for``/``score_against`` for the dashboard to
-render as a result.  Only finished games are stored, and by default only
-non-league games (exhibition, tournament, state/district/national) because
-league games already come from the AYHL/THF scrapers.  A game that another
-source already recorded for the same player, date and opponent is skipped.
+render as a result.  Only finished games are stored.  League games normally come
+from the AYHL/THF scrapers, so MHR's copies are skipped — UNLESS the league
+source publishes no games at all for that player+season (younger divisions often
+have no per-game page on atlantichockey.org), in which case MHR is the only
+source we have and its league games are imported too.  A game another source
+already recorded for the same player, date and opponent is always skipped.
 
 Usage:
     python mhr_ingest.py                      # current season, all confirmed links
@@ -51,6 +57,7 @@ CREATE TABLE IF NOT EXISTS mhr_player_games (
     season_label  VARCHAR(32) NOT NULL,
     game_id       VARCHAR(64) NOT NULL,
     game_date     DATE,
+    game_time     VARCHAR(5),
     game_type     VARCHAR(128),
     league        VARCHAR(255),
     team_for      VARCHAR(255),
@@ -69,12 +76,32 @@ CREATE TABLE IF NOT EXISTS mhr_player_games (
 );
 """
 
+# MHR ranks a TEAM, not a player, so these rows hang off the team the player is
+# linked to and are shared by every player on it.
+CREATE_RANKINGS_SQL = """
+CREATE TABLE IF NOT EXISTS mhr_team_rankings (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    team_id       VARCHAR(32) NOT NULL,
+    season_year   INTEGER NOT NULL,
+    category      VARCHAR(255) NOT NULL,
+    rank_position INTEGER,
+    trend         VARCHAR(8),
+    rank_url      TEXT,
+    scraped_at    TIMESTAMP NOT NULL,
+    created_at    TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE (team_id, season_year, category)
+);
+"""
+
 _CANONICAL_RE = re.compile(r"[\s,.'-]")
 
 
 def current_season_year() -> int:
+    """APRIL cutover — the same rule as every other scraper (ayhl_deep,
+    thf_ahf_deep, njhs_deep, mhr_resolve) and the Dashboard."""
     today = date.today()
-    return today.year if today.month >= 9 else today.year - 1
+    return today.year if today.month >= 4 else today.year - 1
 
 
 def get_conn():
@@ -111,6 +138,7 @@ def table_exists(conn, table: str) -> bool:
 def ensure_table(conn) -> None:
     with conn.cursor() as cur:
         cur.execute(CREATE_TABLE_SQL)
+        cur.execute(CREATE_RANKINGS_SQL)
     conn.commit()
 
 
@@ -149,6 +177,47 @@ def already_recorded(recorded: list[tuple], game: dict) -> bool:
         if game_date and game_date == game["game_date"] and same_club(opponent or "", game["team_against"] or ""):
             return True
     return False
+
+
+def prune_covered_games(conn, season_year: int, names: list[str]) -> int:
+    """Delete MHR rows that a league source also covers for this player+season.
+
+    ``already_recorded`` only stops NEW rows from being inserted. A game can
+    reach ``mhr_player_games`` first (the league source had not been scraped for
+    that season yet), and once the league scraper catches up the MHR row becomes
+    a stale duplicate. The backend merges games across sources by player name
+    with no cross-source dedupe, so the same game would render twice — once with
+    stats (league) and once without (MHR carries none).
+
+    Returns the number of rows removed.
+    """
+    recorded = load_recorded_games(conn, season_year, names)
+    if not recorded:
+        return 0
+
+    with conn.cursor() as cur:
+        cur.execute(
+            """SELECT id, game_date, team_against, team_for FROM mhr_player_games
+                WHERE season_year = %s
+                  AND LOWER(REGEXP_REPLACE(COALESCE(player_name, ''), '[[:space:],.''-]', '', 'g'))
+                      = ANY(%s)""",
+            (season_year, names),
+        )
+        rows = cur.fetchall()
+
+    victims = [
+        str(row[0])
+        for row in rows
+        if already_recorded(recorded, {"game_date": row[1], "team_against": row[2] or row[3]})
+    ]
+    if not victims:
+        return 0
+
+    with conn.cursor() as cur:
+        # id is a uuid column; the list arrives as text, so cast explicitly.
+        cur.execute("DELETE FROM mhr_player_games WHERE id = ANY(%s::uuid[])", (victims,))
+    conn.commit()
+    return len(victims)
 
 
 # -- ingestion ---------------------------------------------------------------
@@ -191,13 +260,14 @@ def upsert_games(conn, link: dict, season_year: int, games: list[dict], dry_run:
             cur.execute(
                 """INSERT INTO mhr_player_games
                    (id, player_id, player_name, season_year, season_label, game_id, game_date,
-                    game_type, league, team_for, team_against, score_for, score_against,
+                    game_time, game_type, league, team_for, team_against, score_for, score_against,
                     scraped_at, source_url)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                    ON CONFLICT (player_id, season_year, game_id) DO UPDATE SET
                      player_name = EXCLUDED.player_name,
                      season_label = EXCLUDED.season_label,
                      game_date = EXCLUDED.game_date,
+                     game_time = EXCLUDED.game_time,
                      game_type = EXCLUDED.game_type,
                      league = EXCLUDED.league,
                      team_for = EXCLUDED.team_for,
@@ -210,12 +280,50 @@ def upsert_games(conn, link: dict, season_year: int, games: list[dict], dry_run:
                 (
                     str(uuid4()), str(link["player_id"]), link["full_name"], season_year,
                     season_label(season_year), game["game_id"], game["game_date"],
-                    game["game_type"], game["league"], game["team_for"], game["team_against"],
+                    game.get("game_time"), game["game_type"], game["league"],
+                    game["team_for"], game["team_against"],
                     game["score_for"], game["score_against"], now, url,
                 ),
             )
     conn.commit()
     return len(games)
+
+
+def upsert_rankings(conn, team_id: str, season_year: int, rankings: list[dict], dry_run: bool) -> int:
+    """Replace the team's ranking rows for the season with what the page shows.
+
+    Categories are MHR's own (state / national / tier), and the set of them
+    changes as a season progresses, so rows that disappeared from the page are
+    dropped rather than left behind as stale ranks.
+    """
+    if dry_run:
+        return len(rankings)
+    now = datetime.now(timezone.utc)
+    with conn.cursor() as cur:
+        for entry in rankings:
+            cur.execute(
+                """INSERT INTO mhr_team_rankings
+                   (id, team_id, season_year, category, rank_position, trend, rank_url, scraped_at)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                   ON CONFLICT (team_id, season_year, category) DO UPDATE SET
+                     rank_position = EXCLUDED.rank_position,
+                     trend = EXCLUDED.trend,
+                     rank_url = EXCLUDED.rank_url,
+                     scraped_at = EXCLUDED.scraped_at,
+                     updated_at = NOW()""",
+                (
+                    str(uuid4()), str(team_id), season_year, entry["category"],
+                    entry["rank"], entry.get("trend"), entry.get("url"), now,
+                ),
+            )
+        if rankings:
+            cur.execute(
+                "DELETE FROM mhr_team_rankings WHERE team_id = %s AND season_year = %s "
+                "AND NOT (category = ANY(%s))",
+                (str(team_id), season_year, [e["category"] for e in rankings]),
+            )
+    conn.commit()
+    return len(rankings)
 
 
 def main() -> None:
@@ -258,26 +366,44 @@ def main() -> None:
                 parsed = parse_team_page(html, season_year, team_id, team_name=link["team_name"])
                 division = parsed["division"] or link["division"] or ""
                 recorded = load_recorded_games(conn, season_year, canonical_names(link["full_name"]))
+                # League games are owned by the league scrapers — but only when that
+                # source actually publishes games for this player+season.  Younger
+                # divisions (e.g. AYHL 11U) have no per-game page at all, so there
+                # MHR is the only source and its league games must be imported.
+                league_source_has_games = bool(recorded)
                 selected, skipped = [], {"played": 0, "league": 0, "recorded": 0}
                 for game in parsed["games"]:
                     if not game["played"]:
                         skipped["played"] += 1
                         continue
-                    if game["is_league"] and not args.include_league:
+                    if game["is_league"] and not args.include_league and league_source_has_games:
                         skipped["league"] += 1
                         continue
                     if already_recorded(recorded, game):
                         skipped["recorded"] += 1
                         continue
                     selected.append({**game, "league": division})
+                note = "" if league_source_has_games else " [league source has no games - league games included]"
                 print(f"  {link['full_name']}: t={team_id} {parsed['team_name']} | {division or '?'} | "
                       f"{len(parsed['games'])} game(s) -> {len(selected)} new "
                       f"(skipped {skipped['league']} league, {skipped['recorded']} recorded, "
-                      f"{skipped['played']} unplayed)")
+                      f"{skipped['played']} unplayed){note}")
                 for game in selected:
                     print(f"    {game['game_date']} {game['game_type']:<24} "
                           f"vs {game['team_against']:<32} {game['result'] or '?'}")
                 total += upsert_games(conn, link, season_year, selected, args.dry_run)
+                ranks = upsert_rankings(conn, team_id, season_year, parsed["rankings"], args.dry_run)
+                if ranks:
+                    print(f"    rankings: " + ", ".join(
+                        f"#{e['rank']} {e['category']}" for e in parsed["rankings"]))
+                else:
+                    print("    rankings: none published for this team")
+                if not args.dry_run:
+                    # Drop MHR rows a league source has since caught up on, so the
+                    # same game is not rendered twice (once with stats, once without).
+                    pruned = prune_covered_games(conn, season_year, canonical_names(link["full_name"]))
+                    if pruned:
+                        print(f"    pruned {pruned} MHR row(s) now covered by a league source")
         print(f"{'would store' if args.dry_run else 'stored'} {total} MHR game(s) for {label}")
     finally:
         conn.close()

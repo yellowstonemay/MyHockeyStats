@@ -27,8 +27,15 @@ public class GameHistoryLookupService {
         "MHR", "mhr_player_games"
     );
 
-    /** Only the MHR table carries team scores; other sources expose per-player stats. */
-    private static final Set<String> SCORE_SOURCES = Set.of("MHR");
+    /**
+     * Sources whose tables carry team scores.
+     *
+     * MHR takes them from the team pages it scrapes; AYHL gets them from the
+     * league scoreboard (scripts/ayhl/scrape_scores.py), which publishes a
+     * GAME# that matches ayhl_player_games.game_id exactly. Every other source
+     * exposes per-player stats only, so their score columns are null.
+     */
+    private static final Set<String> SCORE_SOURCES = Set.of("MHR", "AYHL");
 
     /** Whether a source key is one this lookup can read. */
     public static boolean isKnownSource(String source) {
@@ -85,6 +92,8 @@ public class GameHistoryLookupService {
             .filter(g -> finalSelectedSeasonYear == null || finalSelectedSeasonYear.equals(g.seasonYear()))
             .sorted(Comparator
                 .comparing(IntegrationDtos.GameHistoryGameDto::gameDate, Comparator.nullsLast(Comparator.reverseOrder()))
+                .thenComparing(IntegrationDtos.GameHistoryGameDto::gameTime,
+                               Comparator.nullsLast(Comparator.reverseOrder()))
                 .thenComparing(IntegrationDtos.GameHistoryGameDto::source)
                 .thenComparing(IntegrationDtos.GameHistoryGameDto::gameId, Comparator.nullsLast(String::compareTo))
             )
@@ -121,6 +130,8 @@ public class GameHistoryLookupService {
         String scoreColumns = hasScores
             ? ", t.score_for, t.score_against"
             : ", NULL AS score_for, NULL AS score_against";
+        // Only MHR publishes a start time; the other sources have no such column.
+        String timeColumn = "MHR".equals(source) ? ", t.game_time" : ", NULL AS game_time";
         String overrideJoin = hasOverrides
             ? " LEFT JOIN game_stat_overrides o ON o.player_profile_id = ? AND o.source = ?"
                 + " AND o.season_year = t.season_year AND o.game_id = t.game_id"
@@ -135,7 +146,7 @@ public class GameHistoryLookupService {
             + " t.team_for, t.team_against,"
             + " " + goalsColumn + " AS goals, " + assistsColumn + " AS assists, t.points AS scraped_points,"
             + " " + pimColumn + " AS pim"
-            + scoreColumns + editedColumn + " "
+            + scoreColumns + timeColumn + editedColumn + " "
             + "FROM " + tableName + " t" + overrideJoin + " "
             + "WHERE LOWER(REGEXP_REPLACE(COALESCE(t.player_name, ''), '[[:space:],.''-]', '', 'g')) IN (" + placeholders + ")";
 
@@ -167,6 +178,7 @@ public class GameHistoryLookupService {
                 rs.getString("season_label"),
                 rs.getString("game_id"),
                 date != null ? date.toLocalDate() : null,
+                rs.getString("game_time"),
                 rs.getString("game_type"),
                 rs.getString("league"),
                 rs.getString("team_for"),

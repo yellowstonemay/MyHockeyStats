@@ -65,6 +65,7 @@ CAREER_TABLES = {
 
 MAX_SEARCHES_PER_PLAYER = 12
 MAX_DIVISION_FETCHES = 2
+MAX_CANDIDATE_FETCHES = 8  # team pages verified per player when confirming stored candidates
 AUTO_CONFIRM_MIN_OVERLAP = 0.6
 
 CREATE_TABLE_SQL = """
@@ -91,10 +92,10 @@ CREATE TABLE IF NOT EXISTS mhr_team_links (
 
 
 def current_season_year() -> int:
-    """MHR labels a season by the year it starts in (2026 = "2026-27") and youth
-    seasons start in the fall, so before September we are still in the old one."""
+    """MHR labels a season by the year it starts in (2026 = "2026-27"). APRIL
+    cutover — the same rule as every other scraper and the Dashboard."""
     today = date.today()
-    return today.year if today.month >= 9 else today.year - 1
+    return today.year if today.month >= 4 else today.year - 1
 
 
 def get_conn():
@@ -224,9 +225,16 @@ def load_clubs(conn, player_ids: list[int], season_year: int) -> list[dict]:
                 )
                 rows = [dict(row) for row in cur.fetchall()]
             for row in rows:
+                league_name = (row["league_name"] or "").strip()
+                if not any(ch.isalpha() for ch in league_name):
+                    # AYHL career rows written before the current scraper store the
+                    # numeric league id (e.g. "293"), which can never match an MHR
+                    # division. Fall back to the source ("AYHL"), which is what the
+                    # division string actually carries.
+                    league_name = link["source"] or ""
                 clubs.append({
                     "club": row["team_name"],
-                    "league": (row["league_name"] or link["source"] or "").upper(),
+                    "league": league_name.upper(),
                     "source": (link["source"] or "").upper(),
                 })
     unique: dict[str, dict] = {}
@@ -282,6 +290,93 @@ def fetch_team_facts(client, season_year: int, team_id: str, budget: dict) -> tu
     return parse_team_name(html, soup) or "", parse_division_name(soup) or ""
 
 
+def load_candidate_links(conn, player_ids: list[int], season_year: int) -> list[dict]:
+    """Candidate MHR teams already recorded for these profiles for a season."""
+    with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+        cur.execute(
+            """SELECT DISTINCT team_id, team_name FROM mhr_team_links
+               WHERE player_id = ANY(%s) AND season_year = %s AND link_state <> 'confirmed'
+               ORDER BY team_id""",
+            (player_ids, season_year),
+        )
+        return [dict(r) for r in cur.fetchall()]
+
+
+def age_matches(name: str, division: str, age: int) -> bool:
+    """The candidate's age group must be the player's age (±1), when it states one."""
+    tokens = age_group_tokens(f"{name} {division or ''}")
+    if not tokens:
+        return True  # page states no age group -> don't block on it
+    return bool(tokens & {f"{age}u", f"{age + 1}u", f"{age - 1}u"})
+
+
+def confirm_from_candidate_links(client, conn, player: dict, season_year: int,
+                                 clubs: list[dict], dry_run: bool) -> dict | None:
+    """Confirm one of the ALREADY STORED candidates by reading its team page.
+
+    MHR's team-search JSON API is behind Cloudflare, so the resolver can no longer
+    *discover* teams — but team pages still load. Candidates from earlier runs are
+    therefore verified directly (team name + division + age group) with the same
+    evidence ``is_confident()`` uses. Exactly one match confirms; anything
+    ambiguous stays a candidate and needs a user/admin decision.
+    """
+    candidates = load_candidate_links(conn, player["player_ids"], season_year)
+    if not candidates:
+        return None
+    birthdate = player["birthdate"]
+    age = (season_year - birthdate.year) if birthdate else None
+    budget = {"fetches": MAX_CANDIDATE_FETCHES}
+    matches: list[dict] = []
+    for cand in candidates:
+        if budget["fetches"] <= 0:
+            print(f"    candidate check budget exhausted after {MAX_CANDIDATE_FETCHES} team page(s)")
+            break
+        name, division = fetch_team_facts(client, season_year, str(cand["team_id"]), budget)
+        name = name or cand.get("team_name") or ""
+        if not name:
+            continue
+        if age is not None and not age_matches(name, division, age):
+            print(f"    candidate t={cand['team_id']} {name} | {division or '?'} "
+                  f"-> age group not ~{age}U, staying a candidate")
+            continue
+        for club in clubs:
+            confidence, overlap = score_candidate(club["club"], club["league"], name, division)
+            if is_confident(club["club"], club["league"], name, division):
+                exact_age = f"{age}u" in age_group_tokens(f"{name} {division or ''}") if age is not None else False
+                print(f"    candidate t={cand['team_id']} {name} | {division or '?'} | "
+                      f"club '{club['club']}' overlap={overlap:.2f} confidence={confidence}"
+                      f"{' exact age' if exact_age else ''} -> valid")
+                matches.append({
+                    "team_id": str(cand["team_id"]),
+                    "team_name": name,
+                    "division": division,
+                    "source_league": club["source"],
+                    "match_method": "auto",
+                    "confidence_score": confidence,
+                    "link_state": "confirmed",
+                    "_exact_age": exact_age,
+                })
+                break
+    # Prefer the candidate whose age group is exactly the player's; a ±1U team may
+    # be a sibling/reclassified team, so it only decides when it is the sole match.
+    exact = [m for m in matches if m["_exact_age"]]
+    for m in matches:
+        m.pop("_exact_age", None)
+    if len(exact) == 1:
+        print(f"    confirmed t={exact[0]['team_id']} {exact[0]['team_name']} "
+              f"| {exact[0]['division'] or '?'}")
+        return exact[0]
+    if len(matches) == 1:
+        print(f"    confirmed t={matches[0]['team_id']} {matches[0]['team_name']} "
+              f"| {matches[0]['division'] or '?'}")
+        return matches[0]
+    if matches:
+        print(f"    {len(matches)} candidates look valid "
+              f"({', '.join(m['team_name'] for m in matches)}) -> left as candidates "
+              f"(ambiguous; needs a user/admin decision or a team_links.json override)")
+    return None
+
+
 def resolve_player(client, conn, player: dict, season_year: int, overrides: dict,
                    dry_run: bool) -> list[dict]:
     """Return the link records resolved for one player identity (0, 1 or more)."""
@@ -318,6 +413,14 @@ def resolve_player(client, conn, player: dict, season_year: int, overrides: dict
         return []
 
     budget = {"searches": MAX_SEARCHES_PER_PLAYER, "fetches": MAX_DIVISION_FETCHES}
+
+    # 0) Confirm a team we already stored as a candidate. This is the path that
+    #    still works while MHR's team-search API is Cloudflare-blocked, because it
+    #    only reads team pages.
+    confirmed = confirm_from_candidate_links(client, conn, player, season_year, clubs, dry_run)
+    if confirmed:
+        return [confirmed]
+
     best: dict | None = None
     for club in clubs:
         print(f"  {player['full_name']}: club '{club['club']}' ({club['source']}) -> {age}U")

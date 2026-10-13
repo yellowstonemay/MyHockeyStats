@@ -286,38 +286,50 @@ public class FollowController {
      * followed players), newest first, with a freshness timestamp (asOf = last
      * scrape across the involved players' game tables). Pass ?playerId= to scope
      * "my" games to one player on the account; follows are always account-level.
+     * Pass ?scope=mine to return ONLY the account's own players (the Overview
+     * feed) or ?scope=following for ONLY the followed players (the Following
+     * tab); omit it for both merged.
      */
     @GetMapping("/activity")
     public ResponseEntity<?> activity(@RequestParam(defaultValue = "30") int limit,
                                       @RequestParam(value = "playerId", required = false) Long playerId,
+                                      @RequestParam(value = "scope", required = false) String scope,
                                       @RequestHeader(value = "Authorization", required = false) String authHeader) {
         Optional<User> user = resolveUser(authHeader);
         if (user.isEmpty()) {
             return ResponseEntity.status(401).body(Map.of("error", "Authentication required"));
         }
         long uid = user.get().getId();
-        if (playerId != null && !playerProfileService.isLinked(uid, playerId)) {
+        boolean includeMine = scope == null || scope.isBlank()
+                              || "mine".equalsIgnoreCase(scope) || "all".equalsIgnoreCase(scope);
+        boolean includeFollows = scope == null || scope.isBlank()
+                                 || "following".equalsIgnoreCase(scope) || "all".equalsIgnoreCase(scope);
+        if (includeMine && playerId != null && !playerProfileService.isLinked(uid, playerId)) {
             return ResponseEntity.status(403).body(Map.of("error", "This player is not on your account"));
         }
 
         // Involved players per source: the selected player's links + follows.
         Map<String, Map<String, PlayerMeta>> players = new HashMap<>();
-        for (PlayerSourceLinkService.PlayerLink link : playerSourceLinkService.resolve(uid, playerId)) {
-            players.computeIfAbsent(link.source(), k -> new HashMap<>())
-                   .put(link.sourcePlayerId(), new PlayerMeta("You", true));
+        if (includeMine) {
+            for (PlayerSourceLinkService.PlayerLink link : playerSourceLinkService.resolve(uid, playerId)) {
+                players.computeIfAbsent(link.source(), k -> new HashMap<>())
+                       .put(link.sourcePlayerId(), new PlayerMeta("You", true));
+            }
         }
-        List<Map<String, Object>> follows = jdbcTemplate.query(
-            "SELECT source, source_player_id, player_name FROM follows WHERE user_id = ?",
-            (rs, rn) -> {
-                Map<String, Object> m = new HashMap<>();
-                m.put("source", rs.getString("source"));
-                m.put("id", rs.getString("source_player_id"));
-                m.put("name", rs.getString("player_name"));
-                return m;
-            }, uid);
-        for (Map<String, Object> f : follows) {
-            players.computeIfAbsent((String) f.get("source"), k -> new HashMap<>())
-                   .putIfAbsent((String) f.get("id"), new PlayerMeta((String) f.get("name"), false));
+        if (includeFollows) {
+            List<Map<String, Object>> follows = jdbcTemplate.query(
+                "SELECT source, source_player_id, player_name FROM follows WHERE user_id = ?",
+                (rs, rn) -> {
+                    Map<String, Object> m = new HashMap<>();
+                    m.put("source", rs.getString("source"));
+                    m.put("id", rs.getString("source_player_id"));
+                    m.put("name", rs.getString("player_name"));
+                    return m;
+                }, uid);
+            for (Map<String, Object> f : follows) {
+                players.computeIfAbsent((String) f.get("source"), k -> new HashMap<>())
+                       .putIfAbsent((String) f.get("id"), new PlayerMeta((String) f.get("name"), false));
+            }
         }
 
         List<Map<String, Object>> entries = new ArrayList<>();
@@ -330,7 +342,8 @@ public class FollowController {
             List<String> ids = new ArrayList<>(byId.keySet());
             String placeholders = String.join(",", Collections.nCopies(ids.size(), "?"));
 
-            String sql = "SELECT player_id, game_date, team_for, team_against, goals, assists, points, pim " +
+            String sql = "SELECT player_id, game_date, team_for, team_against, goals, assists, points, pim, " +
+                         "game_type, league " +
                          "FROM " + table + " WHERE player_id IN (" + placeholders + ") " +
                          "AND game_date IS NOT NULL ORDER BY game_date DESC, game_id DESC LIMIT 30";
             List<Map<String, Object>> rows = jdbcTemplate.query(sql,
@@ -339,6 +352,8 @@ public class FollowController {
                     PlayerMeta meta = byId.get(pid);
                     Map<String, Object> m = new HashMap<>();
                     m.put("source", source);
+                    m.put("league", rs.getString("league"));
+                    m.put("gameType", rs.getString("game_type"));
                     m.put("playerName", meta == null ? pid : meta.name());
                     m.put("isMe", meta != null && meta.isMe());
                     m.put("date", rs.getDate("game_date") == null ? null : rs.getDate("game_date").toString());
@@ -363,15 +378,21 @@ public class FollowController {
 
         // MHR games are not reachable through player_source_links — they are
         // resolved per player profile (id, or name for rows scraped before a merge).
-        for (PlayerProfile player : ownPlayers(uid, playerId)) {
+        for (PlayerProfile player : includeMine ? ownPlayers(uid, playerId) : List.<PlayerProfile>of()) {
             List<MhrGameLookupService.MhrGame> mhrGames =
                 mhrGameLookupService.recentGames(player.getId(), player.getFullName(), 30);
             for (MhrGameLookupService.MhrGame g : mhrGames) {
                 Map<String, Object> m = new HashMap<>();
                 m.put("source", "MHR");
+                // The division names the league that runs the game ("AYHL 11U AAA"),
+                // and the type says whether it was league play or an extra — the feed
+                // badges a league game with its league instead of the generic MHR.
+                m.put("league", g.league());
+                m.put("gameType", g.gameType());
                 m.put("playerName", player.getFullName());
                 m.put("isMe", true);
                 m.put("date", g.date() == null ? null : g.date().toString());
+                m.put("time", g.gameTime());
                 m.put("teamFor", g.teamFor());
                 m.put("opponent", g.opponent());
                 // MHR publishes no per-player stats, so these stay null until a
@@ -391,10 +412,19 @@ public class FollowController {
         entries.sort((a, b) -> {
             String da = (String) a.get("date");
             String db = (String) b.get("date");
-            if (da == null && db == null) return 0;
-            if (da == null) return 1;
-            if (db == null) return -1;
-            return db.compareTo(da);
+            if (da != null && db != null) {
+                int byDate = db.compareTo(da);
+                if (byDate != 0) return byDate;
+            } else if (da == null && db != null) {
+                return 1;
+            } else if (da != null) {
+                return -1;
+            }
+            // Same day: latest start time first. Sources that publish no time
+            // (AYHL/THF/AHF/NJHS) keep a stable, time-less tail.
+            String ta = a.get("time") == null ? "" : (String) a.get("time");
+            String tb = b.get("time") == null ? "" : (String) b.get("time");
+            return tb.compareTo(ta);
         });
         int cap = Math.max(0, Math.min(limit, entries.size()));
 

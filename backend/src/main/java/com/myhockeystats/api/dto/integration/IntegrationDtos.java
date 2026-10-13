@@ -129,6 +129,7 @@ public final class IntegrationDtos {
             String seasonLabel,
             String gameId,
             LocalDate gameDate,
+            String gameTime,          // "HH:MM" 24h when the source publishes it (MHR only)
             String gameType,
             String league,
             String teamFor,

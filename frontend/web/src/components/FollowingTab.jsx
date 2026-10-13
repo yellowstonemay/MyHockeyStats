@@ -4,6 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './Car
 import { Button } from './Button'
 import { Input } from './Input'
 import { ExternalLink, Loader2, Search, UserPlus, Trash2, RefreshCw } from 'lucide-react'
+import ActivityFeed from './ActivityFeed'
 
 const SOURCE_META = {
   AYHL: { label: 'AYHL', color: 'bg-indigo-100 text-indigo-700' },
@@ -316,6 +317,9 @@ export default function FollowingTab() {
           )}
         </CardContent>
       </Card>
+
+      {/* Merged recent games from the players this account follows */}
+      <ActivityFeed scope="following" limit={10} />
 
       {/* Followed list */}
       <Card>
