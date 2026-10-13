@@ -8,7 +8,6 @@ export default function SeasonsTab({ playerId, canEdit = false }) {
   const [games, setGames] = useState([])
   const [availableSeasons, setAvailableSeasons] = useState([])
   const [selectedSeason, setSelectedSeason] = useState('')
-  const [selectedGame, setSelectedGame] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [editingKey, setEditingKey] = useState(null)
@@ -75,7 +74,6 @@ export default function SeasonsTab({ playerId, canEdit = false }) {
         pim: Number(editValues.pim ?? 0),
       })
       cancelEdit()
-      setSelectedGame(null)
       setFeedback('Saved. These numbers now override the scraped ones.')
       await loadGameHistory(selectedSeason)
     } catch (err) {
@@ -94,7 +92,6 @@ export default function SeasonsTab({ playerId, canEdit = false }) {
         seasonYear: game.seasonYear,
         gameId: game.gameId,
       })
-      setSelectedGame(null)
       setFeedback(response.message || 'Manual stats cleared.')
       await loadGameHistory(selectedSeason)
     } catch (err) {
@@ -374,8 +371,7 @@ export default function SeasonsTab({ playerId, canEdit = false }) {
                     return (
                       <tr
                         key={`${game.source}-${game.gameId}-${idx}`}
-                        className="border-t border-slate-200 hover:bg-slate-50 cursor-pointer"
-                        onClick={() => setSelectedGame(game)}
+                        className="border-t border-slate-200"
                       >
                         <td className="px-3 py-2">{game.gameDate || '—'}</td>
                         <td className="px-3 py-2 font-medium">{game.source}</td>
@@ -392,7 +388,7 @@ export default function SeasonsTab({ playerId, canEdit = false }) {
                         </td>
                         <td className="px-3 py-2 text-right">{isEditing ? numInput('pim') : (game.pim ?? 0)}</td>
                         {canEdit && (
-                          <td className="px-3 py-2 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                          <td className="px-3 py-2 text-right whitespace-nowrap">
                             {isEditing ? (
                               <span className="inline-flex gap-1 items-center">
                                 <Button size="sm" onClick={() => saveEdit(game)} disabled={saving}>
@@ -439,48 +435,6 @@ export default function SeasonsTab({ playerId, canEdit = false }) {
                 </tbody>
               </table>
             </div>
-
-            {selectedGame && (
-              <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-                <div className="bg-white rounded-lg w-full max-w-2xl shadow-xl border border-slate-200">
-                  <div className="flex items-center justify-between border-b border-slate-200 p-4">
-                    <h3 className="text-lg font-semibold text-slate-900">Game Details</h3>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedGame(null)}
-                      className="text-slate-500 hover:text-slate-800"
-                    >
-                      <X className="w-5 h-5" />
-                    </button>
-                  </div>
-                  <div className="p-4 grid grid-cols-2 gap-4 text-sm">
-                    <div><p className="text-slate-500">Date</p><p className="font-medium">{selectedGame.gameDate || '—'}</p></div>
-                    <div><p className="text-slate-500">Source</p><p className="font-medium">{selectedGame.source || '—'}</p></div>
-                    <div><p className="text-slate-500">Game ID</p><p className="font-medium">{selectedGame.gameId || '—'}</p></div>
-                    <div><p className="text-slate-500">Game Type</p><p className="font-medium">{selectedGame.gameType || '—'}</p></div>
-                    <div><p className="text-slate-500">League</p><p className="font-medium">{selectedGame.league || '—'}</p></div>
-                    <div><p className="text-slate-500">Season</p><p className="font-medium">{selectedGame.seasonLabel || '—'}</p></div>
-                    <div><p className="text-slate-500">Team</p><p className="font-medium">{selectedGame.teamFor || '—'}</p></div>
-                    <div><p className="text-slate-500">Opponent</p><p className="font-medium">{selectedGame.teamAgainst || '—'}</p></div>
-                    <div><p className="text-slate-500">Result</p><p className="font-medium">{formatResult(selectedGame)}</p></div>
-                    <div><p className="text-slate-500">Goals</p><p className="font-medium">{selectedGame.goals ?? 0}</p></div>
-                    <div><p className="text-slate-500">Assists</p><p className="font-medium">{selectedGame.assists ?? 0}</p></div>
-                    <div><p className="text-slate-500">Points</p><p className="font-medium text-primary-700">{selectedGame.points ?? 0}</p></div>
-                    <div><p className="text-slate-500">PIM</p><p className="font-medium">{selectedGame.pim ?? 0}</p></div>
-                  </div>
-                  {selectedGame.statsEdited && (
-                    <p className="px-4 pb-2 text-sm text-amber-700">
-                      Goals/assists/PIM for this game were entered by hand and override the scraped values.
-                    </p>
-                  )}
-                  <div className="border-t border-slate-200 p-4 flex justify-end">
-                    <Button variant="outline" onClick={() => setSelectedGame(null)}>
-                      Close
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            )}
           </>
         )}
       </CardContent>
