@@ -68,6 +68,7 @@ export default function Players() {
 
   const [addForm, setAddForm] = useState(emptyForm)
   const [adding, setAdding] = useState(false)
+  const [showAddForm, setShowAddForm] = useState(false)
 
   // Following: search across AYHL / THF / AHF / NJ HS and add with no other input.
   const [query, setQuery] = useState('')
@@ -143,6 +144,7 @@ export default function Players() {
     try {
       const resp = await integrationsApi.createPlayer(addForm)
       setAddForm(emptyForm)
+      setShowAddForm(false)
       await load()
       flash(resp.message || 'Player added.')
     } catch (err) {
@@ -523,6 +525,83 @@ export default function Players() {
                 ))}
               </ul>
             )}
+
+            {/* Add a player lives in this card too, so "Me or my kids" and
+                "Following" each own their list plus the way to add to it. */}
+            <div className="mt-5 border-t border-slate-200 pt-4">
+              {!showAddForm ? (
+                <Button variant="secondary" onClick={() => setShowAddForm(true)}>
+                  <UserPlus className="w-4 h-4 mr-2" /> Add a player
+                </Button>
+              ) : (
+                <form onSubmit={handleAdd} className="space-y-4">
+                  <p className="text-sm text-slate-600">
+                    Creates a profile you own, so you can edit stats and details — use this for
+                    yourself or your kid. We&apos;ll look up their leagues and seasons automatically.
+                  </p>
+                  <div className="grid sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="label">Player Full Name</label>
+                      <Input
+                        placeholder="Ethan Cai"
+                        value={addForm.fullName}
+                        onChange={(e) => setAddForm({ ...addForm, fullName: e.target.value })}
+                        disabled={adding}
+                      />
+                    </div>
+                    <div>
+                      <label className="label">Birth Month/Year</label>
+                      <Input
+                        placeholder="MM/YYYY (example: 05/2011)"
+                        value={addForm.birthMonthYear}
+                        onChange={(e) => setAddForm({ ...addForm, birthMonthYear: e.target.value })}
+                        disabled={adding}
+                      />
+                    </div>
+                    <div>
+                      <label className="label">Location</label>
+                      <Input
+                        placeholder="City, State"
+                        value={addForm.location}
+                        onChange={(e) => setAddForm({ ...addForm, location: e.target.value })}
+                        disabled={adding}
+                      />
+                    </div>
+                    <div>
+                      <label className="label">Position</label>
+                      <select
+                        className="input appearance-none"
+                        value={addForm.position}
+                        onChange={(e) => setAddForm({ ...addForm, position: e.target.value })}
+                        disabled={adding}
+                      >
+                        {POSITIONS.map((p) => (
+                          <option key={p.value} value={p.value}>
+                            {p.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button type="submit" disabled={adding}>
+                      {adding ? 'Adding…' : 'Add player'}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={adding}
+                      onClick={() => {
+                        setShowAddForm(false)
+                        setAddForm(emptyForm)
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </form>
+              )}
+            </div>
           </CardContent>
         </Card>
 
@@ -530,12 +609,13 @@ export default function Players() {
         <Card className="mb-6">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <UserPlus className="w-5 h-5" /> Follow a player
+              <UserPlus className="w-5 h-5" /> Following ({follows.length}/{maxFollows})
               <CardBadge icon={Lock} tone="indigo">read-only</CardBadge>
             </CardTitle>
             <CardDescription>
               Search by name across AYHL, THF, AHF and NJ high school hockey, then hit Follow —
-              nothing else to fill in. Followed players are view-only.
+              nothing else to fill in. Followed players are view-only and show up in your player
+              selector.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -615,11 +695,8 @@ export default function Players() {
             )}
 
             {/* Who you follow */}
-            <div className="mt-5">
-              <div className="flex items-center justify-between mb-2">
-                <h4 className="text-sm font-semibold text-slate-700">
-                  Following ({follows.length}/{maxFollows})
-                </h4>
+            <div className="mt-5 border-t border-slate-200 pt-4">
+              <div className="flex items-center justify-end mb-2">
                 <button
                   type="button"
                   onClick={loadFollows}
@@ -664,71 +741,6 @@ export default function Players() {
                 </ul>
               )}
             </div>
-          </CardContent>
-        </Card>
-
-        {/* ── Add a new player — manual entry only ─────────────────────── */}
-        <Card className="mb-6">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Pencil className="w-5 h-5" /> Own a player
-              <CardBadge icon={Pencil} tone="green">editable</CardBadge>
-            </CardTitle>
-            <CardDescription>
-              Creates a profile you own, so you can edit stats and details — use this for yourself
-              or your kid. We&apos;ll look up their leagues and seasons automatically.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleAdd} className="space-y-4">
-              <div className="grid sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="label">Player Full Name</label>
-                  <Input
-                    placeholder="Ethan Cai"
-                    value={addForm.fullName}
-                    onChange={(e) => setAddForm({ ...addForm, fullName: e.target.value })}
-                    disabled={adding}
-                  />
-                </div>
-                <div>
-                  <label className="label">Birth Month/Year</label>
-                  <Input
-                    placeholder="MM/YYYY (example: 05/2011)"
-                    value={addForm.birthMonthYear}
-                    onChange={(e) => setAddForm({ ...addForm, birthMonthYear: e.target.value })}
-                    disabled={adding}
-                  />
-                </div>
-                <div>
-                  <label className="label">Location</label>
-                  <Input
-                    placeholder="City, State"
-                    value={addForm.location}
-                    onChange={(e) => setAddForm({ ...addForm, location: e.target.value })}
-                    disabled={adding}
-                  />
-                </div>
-                <div>
-                  <label className="label">Position</label>
-                  <select
-                    className="input appearance-none"
-                    value={addForm.position}
-                    onChange={(e) => setAddForm({ ...addForm, position: e.target.value })}
-                    disabled={adding}
-                  >
-                    {POSITIONS.map((p) => (
-                      <option key={p.value} value={p.value}>
-                        {p.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              <Button type="submit" disabled={adding}>
-                {adding ? 'Adding…' : 'Add player'}
-              </Button>
-            </form>
           </CardContent>
         </Card>
 
