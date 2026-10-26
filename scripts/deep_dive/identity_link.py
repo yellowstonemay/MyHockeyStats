@@ -60,6 +60,20 @@ _PUNCT = re.compile(r"['\-.]+")
 _WS = re.compile(r"\s+")
 _CANON = re.compile(r"[\s,.'\-]+")
 
+# Season column per roster table, used to decide which duplicate id is current
+# (ayhl_roster / njhs_rosters label seasons, thf / ahf store a year).
+ROSTER_SEASON_COLUMN = {
+    "AYHL": "season_label",
+    "THF": "season_year::text",
+    "AHF": "season_year::text",
+    "NJHS": "season_label",
+}
+
+
+def latest_year_expr(column: str) -> str:
+    """SQL aggregate for the newest 4-digit year found in a season column."""
+    return f"max(NULLIF(substring({column} from '[0-9]{{4}}'), '')::int)"
+
 
 def normalize_name(name: Optional[str]) -> str:
     if not name:
@@ -128,6 +142,7 @@ def find_candidates(conn, source: str, keys: list[str]) -> list[dict]:
         SELECT source_player_id,
                min(player_name)            AS player_name,
                count(DISTINCT season_label) AS seasons,
+               {latest_year_expr('season_label')} AS latest_year,
                string_agg(DISTINCT team_name, '; ') AS teams
         FROM {table}
         WHERE regexp_replace(lower(player_name), '[\\s,.''-]', '', 'g') IN ({placeholders})
@@ -144,11 +159,13 @@ def find_roster_candidates(conn, source: str, keys: list[str]) -> list[dict]:
     Note: roster tables differ — ayhl_roster has season_label, thf/ahf_rosters
     use season_year — so we avoid depending on a specific season column."""
     table, name_col = ROSTER_TABLES[source]
+    season_col = ROSTER_SEASON_COLUMN[source]
     placeholders = ", ".join(["%s"] * len(keys))
     sql = f"""
         SELECT player_id AS source_player_id,
                min({name_col}) AS player_name,
                count(*) AS seasons,
+               {latest_year_expr(season_col)} AS latest_year,
                string_agg(DISTINCT team_name, '; ') AS teams
         FROM {table}
         WHERE regexp_replace(lower({name_col}), '[\\s,.''-]', '', 'g') IN ({placeholders})
@@ -184,6 +201,27 @@ def upsert_link(conn, player_id: int, source: str, source_player_id: str,
         cur.execute(sql, (player_id, source, source_player_id))
     conn.commit()
     return f"linked player {player_id} {source}->{source_player_id} ({player_name}){who}"
+
+
+def pick_candidate(cands: list[dict]) -> Optional[dict]:
+    """Choose the id to link when a name matches more than one source record.
+
+    The same kid often exists under two id schemes in one source — a roster id
+    and a career id — which used to make the matcher bail out as "ambiguous"
+    and leave the player with no games. Prefer the candidate whose newest season
+    is the most recent, and only give up when they are equally recent (then the
+    choice is genuinely unknowable from the data).
+    """
+    if not cands:
+        return None
+    if len(cands) == 1:
+        return cands[0]
+    ranked = sorted(cands, key=lambda c: (c.get("latest_year") or 0), reverse=True)
+    best = ranked[0].get("latest_year") or 0
+    runner_up = ranked[1].get("latest_year") or 0
+    if best > runner_up:
+        return ranked[0]
+    return None
 
 
 def main() -> None:
@@ -233,13 +271,18 @@ def main() -> None:
                 if not cands:
                     print(f"    {source}: no match")
                     continue
-                if len(cands) == 1:
-                    c = cands[0]
+                chosen = pick_candidate(cands)
+                if chosen is not None:
+                    reason = "" if len(cands) == 1 else (
+                        f" (most recent of {len(cands)}, others: "
+                        + ", ".join(str(c["source_player_id"]) for c in cands
+                                    if c is not chosen) + ")")
                     print("    " + upsert_link(conn, p["player_id"], source,
-                                               c["source_player_id"], c["player_name"],
-                                               args.dry_run, p["user_emails"]))
+                                               chosen["source_player_id"], chosen["player_name"],
+                                               args.dry_run, p["user_emails"]) + reason)
                 else:
-                    ids = ", ".join(c["source_player_id"] for c in cands)
+                    ids = ", ".join(f"{c['source_player_id']} (latest {c.get('latest_year')})"
+                                    for c in cands)
                     print(f"    {source}: AMBIGUOUS ({len(cands)} players: {ids}) - skipped")
     finally:
         conn.close()

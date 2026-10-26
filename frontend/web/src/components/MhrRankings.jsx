@@ -77,7 +77,7 @@ export default function MhrRankings({ playerId }) {
     <Card>
       <CardHeader className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
         <div>
-          <CardTitle>Team Ranking</CardTitle>
+          <CardTitle>MHR Team Ranking</CardTitle>
           <CardDescription>
             MYHockeyRankings ranks teams, not individual players. Each row is your team&apos;s place
             in that category, and the arrow shows movement since last week.
@@ -109,7 +109,7 @@ export default function MhrRankings({ playerId }) {
           </div>
         ) : seasons.length === 0 ? (
           <p className="text-sm text-slate-500 text-center py-6">
-            No team ranking yet. MHR only ranks whole teams — once your team is ranked (and the daily
+            No MHR team ranking yet. MHR only ranks whole teams — once your team is ranked (and the daily
             deep-dive has read its page) the categories appear here.
           </p>
         ) : (
@@ -151,7 +151,7 @@ export default function MhrRankings({ playerId }) {
               </div>
             ))}
             <p className="text-[11px] text-slate-400">
-              A team ranking from MYHockeyRankings — every player on the team shares it.
+              A MHR team ranking — every player on the team shares it.
             </p>
           </div>
         )}
