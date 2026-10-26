@@ -1,17 +1,21 @@
 package com.myhockeystats.service.integration;
 
 import com.myhockeystats.api.dto.integration.IntegrationDtos;
+import com.myhockeystats.service.PlayerSourceLinkService;
 import java.sql.Date;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -37,6 +41,24 @@ public class GameHistoryLookupService {
      */
     private static final Set<String> SCORE_SOURCES = Set.of("MHR", "AYHL");
 
+    /**
+     * source -> season-aggregate table.
+     *
+     * A season can exist here long before the source publishes its game sheets:
+     * a new season starts with roster GP/G/A totals while the per-game rows only
+     * appear once the games are played and scored. Those seasons used to be
+     * missing from the season picker entirely, which read as "this player has no
+     * current season".
+     */
+    private static final Map<String, String> CAREER_TABLES = Map.of(
+        "AYHL", "ayhl_player_career",
+        "THF", "thf_player_career",
+        "AHF", "ahf_player_career",
+        "NJHS", "njhs_player_career"
+    );
+
+    private static final Pattern SEASON_YEAR = Pattern.compile("(\\d{4})");
+
     /** Whether a source key is one this lookup can read. */
     public static boolean isKnownSource(String source) {
         return source != null && SOURCE_TABLES.containsKey(source.trim().toUpperCase(Locale.ROOT));
@@ -56,6 +78,20 @@ public class GameHistoryLookupService {
         String playerName,
         Integer requestedSeasonYear
     ) {
+        return lookupByPlayerName(playerId, playerName, requestedSeasonYear, List.of());
+    }
+
+    /**
+     * Game history for a player, with the season picker widened by the seasons
+     * of the player's linked identities (so a season that only has season
+     * totals so far still appears, with an empty game list).
+     */
+    public IntegrationDtos.GameHistoryResponseDto lookupByPlayerName(
+        String playerId,
+        String playerName,
+        Integer requestedSeasonYear,
+        List<PlayerSourceLinkService.PlayerLink> links
+    ) {
         Set<String> canonicalNames = buildCanonicalLookupKeys(playerName);
         List<IntegrationDtos.GameHistoryGameDto> allGames = new ArrayList<>();
         Long overridePlayerId = parseProfileId(playerId);
@@ -69,15 +105,19 @@ public class GameHistoryLookupService {
             allGames.addAll(loadGamesForSource(source, tableName, canonicalNames, overridePlayerId));
         }
 
-        List<IntegrationDtos.GameHistorySeasonOptionDto> seasonOptions = allGames.stream()
+        // Seasons with game rows first (they keep their label), then any extra
+        // season we only know from the career aggregates.
+        Map<Integer, IntegrationDtos.GameHistorySeasonOptionDto> seasonsByYear = new LinkedHashMap<>();
+        allGames.stream()
             .filter(g -> g.seasonYear() != null)
-            .map(g -> new IntegrationDtos.GameHistorySeasonOptionDto(g.seasonYear(), g.seasonLabel()))
-            .collect(Collectors.toMap(
-                IntegrationDtos.GameHistorySeasonOptionDto::seasonYear,
-                x -> x,
-                (a, b) -> a
-            ))
-            .values()
+            .forEach(g -> seasonsByYear.putIfAbsent(
+                g.seasonYear(),
+                new IntegrationDtos.GameHistorySeasonOptionDto(g.seasonYear(), g.seasonLabel())));
+        for (IntegrationDtos.GameHistorySeasonOptionDto option : careerSeasonOptions(links)) {
+            seasonsByYear.putIfAbsent(option.seasonYear(), option);
+        }
+
+        List<IntegrationDtos.GameHistorySeasonOptionDto> seasonOptions = seasonsByYear.values()
             .stream()
             .sorted(Comparator.comparing(IntegrationDtos.GameHistorySeasonOptionDto::seasonYear).reversed())
             .toList();
@@ -192,6 +232,51 @@ public class GameHistoryLookupService {
                 edited
             );
         });
+    }
+
+    /**
+     * Season options from the players' linked career rows. A source can publish
+     * a season's totals before its game sheets, so these fill the gaps that the
+     * game tables cannot cover yet.
+     */
+    private List<IntegrationDtos.GameHistorySeasonOptionDto> careerSeasonOptions(
+        List<PlayerSourceLinkService.PlayerLink> links
+    ) {
+        List<IntegrationDtos.GameHistorySeasonOptionDto> out = new ArrayList<>();
+        if (links == null) {
+            return out;
+        }
+        for (PlayerSourceLinkService.PlayerLink link : links) {
+            String source = link.source() == null ? "" : link.source().trim().toUpperCase(Locale.ROOT);
+            String tableName = CAREER_TABLES.get(source);
+            if (tableName == null || link.sourcePlayerId() == null || link.sourcePlayerId().isBlank()
+                || !tableExists(tableName)) {
+                continue;
+            }
+            try {
+                List<String> labels = jdbcTemplate.queryForList(
+                    "SELECT DISTINCT season_label FROM " + tableName + " WHERE source_player_id = ?",
+                    String.class, link.sourcePlayerId());
+                for (String label : labels) {
+                    Integer year = seasonStartYear(label);
+                    if (year != null) {
+                        out.add(new IntegrationDtos.GameHistorySeasonOptionDto(year, label));
+                    }
+                }
+            } catch (Exception e) {
+                // table shape differs per source; a missing season is not fatal
+            }
+        }
+        return out;
+    }
+
+    /** Start year of a season label ("2026-2027 Season" -> 2026). */
+    private static Integer seasonStartYear(String label) {
+        if (label == null) {
+            return null;
+        }
+        Matcher m = SEASON_YEAR.matcher(label);
+        return m.find() ? Integer.valueOf(m.group(1)) : null;
     }
 
     private boolean tableExists(String tableName) {

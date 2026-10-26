@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { integrationsApi } from '../../lib/integrationsApi'
+import { reportApi } from '../../lib/reportApi'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../Card'
 import { Button } from '../Button'
 import { AlertCircle, Loader2, RefreshCw, Download, FileText, Pencil, RotateCcw, X } from 'lucide-react'
@@ -15,6 +16,9 @@ export default function SeasonsTab({ playerId, canEdit = false, onSaved }) {
   const [editValues, setEditValues] = useState({})
   const [savingKey, setSavingKey] = useState(null)
   const [feedback, setFeedback] = useState('')
+  // Season totals per season year, used when a season has no per-game rows yet
+  // (a new season publishes its GP/G/A totals before the game sheets).
+  const [seasonTotals, setSeasonTotals] = useState({})
 
   // Only the very first fetch may blank the table; later ones (season change,
   // save, reset) refresh in place so the rows never disappear mid-edit.
@@ -24,7 +28,22 @@ export default function SeasonsTab({ playerId, canEdit = false, onSaved }) {
 
   useEffect(() => {
     loadGameHistory()
+    loadSeasonTotals()
   }, [playerId])
+
+  const loadSeasonTotals = async () => {
+    try {
+      const report = await reportApi.fetchMyReport(playerId)
+      const byYear = {}
+      for (const season of report?.seasons || []) {
+        if (season?.seasonYear != null) byYear[season.seasonYear] = season.combined || null
+      }
+      setSeasonTotals(byYear)
+    } catch {
+      // Totals are a nicety for seasons without games; keep the table usable.
+      setSeasonTotals({})
+    }
+  }
 
   const loadGameHistory = async (seasonYear = '') => {
     if (firstLoadRef.current) setLoading(true)
@@ -118,6 +137,9 @@ export default function SeasonsTab({ playerId, canEdit = false, onSaved }) {
   const selectedSeasonLabel = availableSeasons.find(
     (season) => season.seasonYear === selectedSeason
   )?.seasonLabel || 'Selected Season'
+
+  // Career totals for the selected season (may exist while its game sheets don't).
+  const selectedSeasonTotals = seasonTotals[Number(selectedSeason)] || null
 
   const formatResult = (game) => {
     if (game.scoreFor == null || game.scoreAgainst == null) return '—'
@@ -333,8 +355,36 @@ export default function SeasonsTab({ playerId, canEdit = false, onSaved }) {
 
         {!loading && games.length === 0 && !error && (
           <div className="text-center py-8 text-slate-500">
-            <p>No game records found for this season.</p>
-            <p className="text-sm mt-1">Game history will appear once per-game data exists for your profile name.</p>
+            {selectedSeasonTotals ? (
+              <>
+                <p className="text-slate-700 font-medium">
+                  {selectedSeasonLabel} totals
+                </p>
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-4 mb-3">
+                  {[
+                    ['Games', selectedSeasonTotals.games],
+                    ['Goals', selectedSeasonTotals.goals],
+                    ['Assists', selectedSeasonTotals.assists],
+                    ['Points', selectedSeasonTotals.points],
+                    ['PIM', selectedSeasonTotals.pim],
+                  ].map(([label, value]) => (
+                    <div key={label} className="p-3 rounded-lg bg-slate-100">
+                      <p className="text-xs text-slate-600">{label}</p>
+                      <p className="text-lg font-semibold">{value ?? 0}</p>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-sm mt-1">
+                  These are the season totals we have so far. Per-game rows show up
+                  once the league publishes its game sheets.
+                </p>
+              </>
+            ) : (
+              <>
+                <p>No game records found for this season.</p>
+                <p className="text-sm mt-1">Game history will appear once per-game data exists for your profile name.</p>
+              </>
+            )}
           </div>
         )}
 

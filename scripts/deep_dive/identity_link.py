@@ -16,7 +16,11 @@ logic as the backend (CareerLookupService):
 
 Rules:
   - Exactly ONE distinct source_player_id in a source  -> auto-link (CONFIRMED)
-  - Multiple distinct player_ids in a source           -> ambiguous, skip (report)
+  - Multiple distinct player_ids in a source           -> link the most recent,
+    and fold the older ones in when they are clearly the SAME player (their
+    seasons do not overlap and they share a club name). Sources renumber
+    players from time to time, so a 2024-25 record can sit under a different id
+    than the 2025-26 one; skipping those used to lose whole seasons.
   - Zero matches                                       -> no link (report)
 
 Idempotent: existing links are refreshed via ON CONFLICT (player_id, source).
@@ -143,7 +147,8 @@ def find_candidates(conn, source: str, keys: list[str]) -> list[dict]:
                min(player_name)            AS player_name,
                count(DISTINCT season_label) AS seasons,
                {latest_year_expr('season_label')} AS latest_year,
-               string_agg(DISTINCT team_name, '; ') AS teams
+               string_agg(DISTINCT team_name, '; ') AS teams,
+               string_agg(DISTINCT season_label, ';') AS season_labels
         FROM {table}
         WHERE regexp_replace(lower(player_name), '[\\s,.''-]', '', 'g') IN ({placeholders})
         GROUP BY source_player_id
@@ -166,7 +171,8 @@ def find_roster_candidates(conn, source: str, keys: list[str]) -> list[dict]:
                min({name_col}) AS player_name,
                count(*) AS seasons,
                {latest_year_expr(season_col)} AS latest_year,
-               string_agg(DISTINCT team_name, '; ') AS teams
+               string_agg(DISTINCT team_name, '; ') AS teams,
+               string_agg(DISTINCT {season_col}, ';') AS season_labels
         FROM {table}
         WHERE regexp_replace(lower({name_col}), '[\\s,.''-]', '', 'g') IN ({placeholders})
         GROUP BY player_id
@@ -222,6 +228,136 @@ def pick_candidate(cands: list[dict]) -> Optional[dict]:
     if best > runner_up:
         return ranked[0]
     return None
+
+
+# Words that say nothing about which club a team belongs to, so they must not
+# count as evidence that two source records are the same player.
+_CLUB_STOPWORDS = {
+    "hockey", "club", "academy", "elite", "premier", "select", "travel",
+    "ice", "team", "junior", "youth", "squirt", "peewee", "bantam", "mite",
+}
+
+
+def season_years(labels: Optional[str]) -> set[int]:
+    """Start years in a ';'-joined season list.
+
+    Only the FIRST 4-digit group of each label counts: "2024-2025 Season" is the
+    2024 season, and reading the end year too would make consecutive seasons look
+    like they overlap (2024-25 vs 2025-26).
+    """
+    out: set[int] = set()
+    for label in (labels or "").split(";"):
+        m = re.search(r"(\d{4})", label)
+        if m:
+            out.add(int(m.group(1)))
+    return out
+
+
+def club_tokens(teams: Optional[str]) -> set[str]:
+    """Distinctive words of a ';'-joined team list (drops level/generic words)."""
+    out: set[str] = set()
+    for team in (teams or "").split(";"):
+        for word in re.split(r"[^a-z0-9]+", team.lower()):
+            if len(word) >= 4 and not word.isdigit() and word not in _CLUB_STOPWORDS:
+                out.add(word)
+    return out
+
+
+def extra_ids_to_fold(chosen: dict, cands: list[dict]) -> tuple[list[dict], list[str]]:
+    """Ids of the same player under a retired number, plus why others are left out.
+
+    A source renumbers players occasionally, so one kid can hold an old id
+    (2023-24 / 2024-25) and a current one (2025-26 onwards). Those records must
+    be folded into the linked id, otherwise their seasons stay invisible.
+    Only fold when the evidence is unambiguous: no shared season (two live
+    records with the same name are two people) and at least one shared club.
+    """
+    chosen_years = season_years(chosen.get("season_labels"))
+    chosen_clubs = club_tokens(chosen.get("teams"))
+    extras: list[dict] = []
+    notes: list[str] = []
+    used = set(chosen_years)
+    for cand in sorted(cands, key=lambda c: (c.get("latest_year") or 0), reverse=True):
+        if cand is chosen:
+            continue
+        cid = cand["source_player_id"]
+        years = season_years(cand.get("season_labels"))
+        clubs = club_tokens(cand.get("teams"))
+        if not years:
+            notes.append(f"{cid}: no season info, left alone")
+            continue
+        if years & used:
+            notes.append(f"{cid}: same seasons, looks like another player, left alone")
+            continue
+        if not (clubs & chosen_clubs):
+            notes.append(f"{cid}: no club in common "
+                         f"({', '.join(sorted(clubs)) or 'unknown'}), left alone")
+            continue
+        extras.append(cand)
+        used |= years
+    return extras, notes
+
+
+# Columns copied when folding a retired id's career rows (only those the table
+# actually has are used).
+_CAREER_COPY_COLUMNS = [
+    "source_player_id", "player_name", "season_label", "season_year", "league_name",
+    "team_name", "team_id", "jersey_number", "games_played", "goals", "assists",
+    "points", "penalties", "pim", "is_user_modified", "last_scraped_at",
+]
+
+
+def fold_legacy_seasons(conn, source: str, legacy_id: str, target_id: str,
+                        season_labels: list[str], dry_run: bool) -> str:
+    """Copy a retired id's career seasons onto the id we link to.
+
+    Career rows are read by source_player_id everywhere downstream and a player
+    holds ONE id per source, so an id the source no longer uses has to be folded
+    into the current one or its seasons stay invisible. Rows already present on
+    the target are left untouched.
+    """
+    table = SOURCE_TABLES[source]
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = %s",
+            (table,))
+        present = {row[0] for row in cur.fetchall()}
+    cols = [c for c in _CAREER_COPY_COLUMNS if c in present]
+    if "source_player_id" not in cols or "season_label" not in cols:
+        return f"cannot fold {source}:{legacy_id} (unexpected {table} shape)"
+    extra = [c for c in ("created_at", "updated_at") if c in present]
+
+    select_list = ", ".join("%s" if c == "source_player_id" else "src." + c for c in cols)
+    insert_cols = ", ".join(cols + extra)
+    insert_values = ", ".join(["gen_random_uuid()"] + [select_list] + ["NOW()"] * len(extra))
+    sql = f"""
+        INSERT INTO {table} (id, {insert_cols})
+        SELECT {insert_values}
+        FROM {table} src
+        WHERE src.source_player_id = %s
+          AND src.season_label = ANY(%s)
+          AND NOT EXISTS (
+                SELECT 1 FROM {table} t
+                WHERE t.source_player_id = %s AND t.season_label = src.season_label)
+    """
+
+    if dry_run:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT COUNT(*) FROM {table} src WHERE src.source_player_id = %s "
+                "AND src.season_label = ANY(%s)", (legacy_id, season_labels))
+            n = cur.fetchone()[0]
+        return (f"[dry-run] would fold {n} season(s) {season_labels} from "
+                f"{source}:{legacy_id} into {source}:{target_id}")
+
+    with conn.cursor() as cur:
+        cur.execute(sql, (target_id, legacy_id, season_labels, target_id))
+        n = cur.rowcount
+    conn.commit()
+    if not n:
+        return f"{source}:{legacy_id}: nothing left to fold"
+    return (f"folded {n} season(s) {', '.join(sorted(season_labels))} from "
+            f"{source}:{legacy_id} into {source}:{target_id}")
 
 
 def main() -> None:
@@ -280,6 +416,15 @@ def main() -> None:
                     print("    " + upsert_link(conn, p["player_id"], source,
                                                chosen["source_player_id"], chosen["player_name"],
                                                args.dry_run, p["user_emails"]) + reason)
+                    extras, notes = extra_ids_to_fold(chosen, cands)
+                    for note in notes:
+                        print(f"      {note}")
+                    for extra in extras:
+                        labels = [lbl.strip() for lbl in
+                                  (extra.get("season_labels") or "").split(";") if lbl.strip()]
+                        print("      " + fold_legacy_seasons(
+                            conn, source, extra["source_player_id"],
+                            chosen["source_player_id"], labels, args.dry_run))
                 else:
                     ids = ", ".join(f"{c['source_player_id']} (latest {c.get('latest_year')})"
                                     for c in cands)

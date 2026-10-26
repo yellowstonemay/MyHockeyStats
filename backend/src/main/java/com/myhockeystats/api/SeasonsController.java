@@ -7,6 +7,7 @@ import com.myhockeystats.repository.UserRepository;
 import com.myhockeystats.security.JwtUtil;
 import com.myhockeystats.security.IntegrationAccessGuard;
 import com.myhockeystats.service.PlayerProfileService;
+import com.myhockeystats.service.PlayerSourceLinkService;
 import com.myhockeystats.service.integration.CareerLookupService;
 import com.myhockeystats.service.integration.GameHistoryLookupService;
 import com.myhockeystats.service.integration.MhrRankingLookupService;
@@ -54,6 +55,9 @@ public class SeasonsController {
 
     @Autowired
     private GameHistoryLookupService gameHistoryLookupService;
+
+    @Autowired
+    private PlayerSourceLinkService playerSourceLinkService;
 
     @Autowired
     private MhrRankingLookupService mhrRankingLookupService;
@@ -275,7 +279,8 @@ public class SeasonsController {
         IntegrationDtos.GameHistoryResponseDto response = gameHistoryLookupService.lookupByPlayerName(
             String.valueOf(player.getId()),
             player.getFullName(),
-            seasonYear
+            seasonYear,
+            playerSourceLinkService.forPlayer(player.getId())
         );
 
         return ResponseEntity.ok()
