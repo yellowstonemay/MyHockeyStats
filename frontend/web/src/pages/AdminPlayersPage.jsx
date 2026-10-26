@@ -20,6 +20,39 @@ function daysSince(ts) {
   return (Date.now() - d.getTime()) / 86400000
 }
 
+// How a login relates to a player, and whether that login may change its data.
+// Owner > editor > read-only: the owner is the only account that can hand out
+// (or take away) edit rights for other logins.
+const ACCESS_STYLES = {
+  owner: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+  editor: 'bg-sky-50 text-sky-800 border-sky-200',
+  readonly: 'bg-slate-50 text-slate-600 border-slate-200',
+}
+
+function accessRole(entry) {
+  if (entry?.isOwner) return 'owner'
+  if (entry?.canEdit) return 'editor'
+  return 'readonly'
+}
+
+/** One account↔player pair with its rights, e.g. "Paden Zhou · owner". */
+function AccessChip({ label, role, sub }) {
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] whitespace-nowrap ${ACCESS_STYLES[role] || ACCESS_STYLES.readonly}`}
+      title={sub}
+    >
+      <span className="font-medium">{label}</span>
+      <span className="opacity-70">· {role === 'readonly' ? 'read-only' : role === 'editor' ? 'can edit' : 'owner'}</span>
+    </span>
+  )
+}
+
+/** Empty state for the access columns. */
+function NoAccess() {
+  return <span className="text-xs text-slate-400">none</span>
+}
+
 export default function AdminPlayersPage() {
   const { user } = useAuth()
   const [players, setPlayers] = useState([])
@@ -273,8 +306,17 @@ export default function AdminPlayersPage() {
         {isAdmin && !loading && !error && (
           <Card>
             <CardHeader>
-              <CardTitle>Players ({players.length})</CardTitle>
-              <CardDescription>Registration, last visit, and deep-dive freshness. <strong>Last deep-dive</strong> shows whether the most recent scrape of that player succeeded or failed (hover for the reason and the source). The <strong>Full deep-dive</strong> button enqueues an all-seasons backfill for that player (picked up by the Mac mini poller) and opens a status popup; while a refresh is queued or running the button reads <strong>Queued…</strong>/<strong>Running…</strong> and reopens that popup instead of enqueuing a second run.</CardDescription>
+              <CardTitle>Accounts ({players.length})</CardTitle>
+              <CardDescription>
+                One row per <strong>login (email)</strong>. A login is linked to one or more{' '}
+                <strong>players</strong>; each link carries rights — <em>owner</em> (set up the
+                profile, hand out edit rights, edit everything), <em>can edit</em> (granted by the
+                owner, may change profile and manual G/A), or <em>read-only</em>. The same player can
+                appear on several logins, e.g. two parents. <strong>Last deep-dive</strong> shows
+                whether the most recent scrape for that login's players succeeded (hover for the
+                reason and source); the <strong>Full deep-dive</strong> button enqueues an
+                all-seasons backfill for that player and opens a status popup.
+              </CardDescription>
             </CardHeader>
             <CardContent>
               <div className="overflow-x-auto">
@@ -282,9 +324,9 @@ export default function AdminPlayersPage() {
                   <thead className="bg-slate-100 text-slate-700">
                     <tr>
                       <th className="px-3 py-2 text-left">Registered</th>
-                      <th className="px-3 py-2 text-left">Email</th>
+                      <th className="px-3 py-2 text-left">Email (login)</th>
                       <th className="px-3 py-2 text-left">Name</th>
-                      <th className="px-3 py-2 text-left">Profile</th>
+                      <th className="px-3 py-2 text-left">Players on this login</th>
                       <th className="px-3 py-2 text-left">Links</th>
                       <th className="px-3 py-2 text-left">Last visit</th>
                       <th className="px-3 py-2 text-left">Last deep-dive</th>
@@ -303,7 +345,22 @@ export default function AdminPlayersPage() {
                           <td className="px-3 py-2 whitespace-nowrap">{fmt(p.created_at)}</td>
                           <td className="px-3 py-2 font-medium">{p.email}</td>
                           <td className="px-3 py-2">{p.user_name || '—'}{p.is_admin ? <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700">admin</span> : null}</td>
-                          <td className="px-3 py-2">{p.profile_name || '—'}</td>
+                          <td className="px-3 py-2">
+                            {Array.isArray(p.players) && p.players.length > 0 ? (
+                              <div className="flex flex-wrap gap-1">
+                                {p.players.map((pl) => (
+                                  <AccessChip
+                                    key={`${p.id}-${pl.id}`}
+                                    label={`${pl.name} #${pl.id}`}
+                                    role={accessRole(pl)}
+                                    sub={`relation: ${pl.relation || 'unknown'}`}
+                                  />
+                                ))}
+                              </div>
+                            ) : (
+                              <NoAccess />
+                            )}
+                          </td>
                           <td className="px-3 py-2">
                             <span className="text-slate-500">{(p.sources || '').split(',').filter(Boolean).join(', ') || '—'}</span>
                             <span className="ml-1 text-xs text-slate-400">({p.link_count ?? 0})</span>
@@ -347,11 +404,13 @@ export default function AdminPlayersPage() {
         {isAdmin && (
           <Card className="mt-6">
             <CardHeader>
-              <CardTitle>Player ownership ({profiles.length})</CardTitle>
+              <CardTitle>Players &amp; who can edit ({profiles.length})</CardTitle>
               <CardDescription>
-                One owner account per player decides the profile, manual G/A entries and who else may
-                edit. Duplicate rows usually mean the same kid was added twice. Transferring ownership
-                attaches the account to the player automatically.
+                One row per <strong>player profile</strong> — the same rows the Accounts table points
+                at, read the other way round. Each player has exactly one <em>owner</em> login; other
+                logins attached to it are <em>read-only</em> until the owner grants them{' '}
+                <em>can edit</em>. Duplicate rows usually mean the same kid was added twice.
+                Transferring ownership attaches the new account automatically.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -366,9 +425,7 @@ export default function AdminPlayersPage() {
                     <tr>
                       <th className="px-3 py-2 text-left">Player</th>
                       <th className="px-3 py-2 text-left">Born</th>
-                      <th className="px-3 py-2 text-left">Owner</th>
-                      <th className="px-3 py-2 text-left">Attached logins</th>
-                      <th className="px-3 py-2 text-left">May edit</th>
+                      <th className="px-3 py-2 text-left">Logins &amp; rights</th>
                       <th className="px-3 py-2 text-left">Transfer to</th>
                       <th className="px-3 py-2 text-left">Merge duplicate into</th>
                     </tr>
@@ -384,14 +441,21 @@ export default function AdminPlayersPage() {
                           {p.birthdate ? String(p.birthdate).slice(0, 10) : '—'}
                         </td>
                         <td className="px-3 py-2">
-                          {p.owner_email || (
-                            <span className="text-xs px-2 py-1 rounded-full bg-amber-100 text-amber-700">
-                              unowned
-                            </span>
+                          {Array.isArray(p.logins) && p.logins.length > 0 ? (
+                            <div className="flex flex-col gap-1">
+                              {p.logins.map((l) => (
+                                <AccessChip
+                                  key={`${p.id}-${l.email}`}
+                                  label={l.email}
+                                  role={accessRole(l)}
+                                  sub={`relation: ${l.relation || 'unknown'}${l.isPrimary ? ' · default player' : ''}`}
+                                />
+                              ))}
+                            </div>
+                          ) : (
+                            <NoAccess />
                           )}
                         </td>
-                        <td className="px-3 py-2 text-slate-600">{p.attached_logins || '—'}</td>
-                        <td className="px-3 py-2 text-slate-600">{p.editors || '—'}</td>
                         <td className="px-3 py-2">
                           <div className="flex items-center gap-2">
                             <input

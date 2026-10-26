@@ -1,5 +1,6 @@
 package com.myhockeystats.api;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.myhockeystats.model.User;
 import com.myhockeystats.repository.UserRepository;
 import com.myhockeystats.security.JwtUtil;
@@ -27,6 +28,30 @@ import java.util.Optional;
 @RestController
 @RequestMapping("/api/admin")
 public class AdminController {
+
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
+    /**
+     * JdbcTemplate hands a PostgreSQL {@code json} column back as a driver object
+     * (PGobject) rather than a String, so the aggregated access lists are decoded
+     * here instead of shipping JSON-as-text for the browser to re-parse.
+     */
+    private static void decodeJsonColumn(Map<String, Object> row, String column) {
+        Object value = row.get(column);
+        if (value == null) {
+            row.put(column, List.of());
+            return;
+        }
+        if (value instanceof List) {
+            return;
+        }
+        String text = value instanceof String s ? s : String.valueOf(value);
+        try {
+            row.put(column, OBJECT_MAPPER.readValue(text, List.class));
+        } catch (Exception e) {
+            row.put(column, List.of());
+        }
+    }
 
     @Autowired
     private JwtUtil jwtUtil;
@@ -67,6 +92,17 @@ public class AdminController {
             SELECT u.id, u.email, u.full_name AS user_name, u.is_admin,
                    u.created_at, u.last_login_at,
                    STRING_AGG(DISTINCT pp.full_name, ', ') AS profile_name,
+                   (
+                       SELECT COALESCE(json_agg(json_build_object(
+                                  'id', pl.id,
+                                  'name', pl.full_name,
+                                  'relation', lup.relation,
+                                  'canEdit', lup.can_edit,
+                                  'isOwner', (pl.owner_user_id = u.id)) ORDER BY pl.full_name), '[]'::json)
+                       FROM user_players lup
+                       JOIN player_profiles pl ON pl.id = lup.player_id
+                       WHERE lup.user_id = u.id
+                   ) AS players,
                    COUNT(DISTINCT up.player_id) AS player_count,
                    COUNT(DISTINCT psl.id) AS link_count,
                    STRING_AGG(DISTINCT psl.source, ',') AS sources,
@@ -114,6 +150,7 @@ public class AdminController {
             ORDER BY u.created_at DESC
             """;
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql);
+        rows.forEach(row -> decodeJsonColumn(row, "players"));
         return ResponseEntity.ok(Map.of("players", rows));
     }
 
@@ -135,7 +172,18 @@ public class AdminController {
                    pp.created_at,
                    STRING_AGG(DISTINCT u.email, ', ') AS attached_logins,
                    STRING_AGG(DISTINCT u.email, ', ')
-                       FILTER (WHERE up.can_edit) AS editors
+                       FILTER (WHERE up.can_edit) AS editors,
+                   (
+                       SELECT COALESCE(json_agg(json_build_object(
+                                  'email', lu.email,
+                                  'relation', lup.relation,
+                                  'canEdit', lup.can_edit,
+                                  'isOwner', (lup.user_id = pp.owner_user_id),
+                                  'isPrimary', lup.is_primary) ORDER BY lu.email), '[]'::json)
+                       FROM user_players lup
+                       JOIN users lu ON lu.id = lup.user_id
+                       WHERE lup.player_id = pp.id
+                   ) AS logins
             FROM player_profiles pp
             LEFT JOIN users owner ON owner.id = pp.owner_user_id
             LEFT JOIN users creator ON creator.id = pp.created_by_user_id
@@ -146,6 +194,7 @@ public class AdminController {
             ORDER BY pp.created_at DESC, pp.id DESC
             """;
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql);
+        rows.forEach(row -> decodeJsonColumn(row, "logins"));
         return ResponseEntity.ok(Map.of("profiles", rows));
     }
 
