@@ -48,6 +48,28 @@ public class PlayerReportController {
         return playerId != null && !playerProfileService.isLinked(uid, playerId);
     }
 
+    /**
+     * JSON bodies may carry an id/season either as a number or as a string
+     * (the UI stores the selected player id as a string). Coerce leniently
+     * instead of blind-casting to Number, which threw ClassCastException.
+     */
+    private static Long asLong(Object value) {
+        if (value == null) return null;
+        if (value instanceof Number number) return number.longValue();
+        String text = String.valueOf(value).trim();
+        if (text.isEmpty() || "null".equalsIgnoreCase(text)) return null;
+        try {
+            return Long.parseLong(text);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private static Integer asInteger(Object value) {
+        Long parsed = asLong(value);
+        return parsed == null ? null : parsed.intValue();
+    }
+
     private Optional<User> resolveUser(String authHeader) {
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             return Optional.empty();
@@ -128,18 +150,15 @@ public class PlayerReportController {
         }
         long uid = user.get().getId();
 
-        Long playerId = body == null || body.get("playerId") == null
-            ? null : ((Number) body.get("playerId")).longValue();
+        Long playerId = body == null ? null : asLong(body.get("playerId"));
         if (forbidden(uid, playerId)) {
             return ResponseEntity.status(403).body(Map.of("error", "This player is not on your account"));
         }
 
-        Integer season = body == null || body.get("season") == null
-            ? null : ((Number) body.get("season")).intValue();
+        Integer season = body == null ? null : asInteger(body.get("season"));
         if (season == null) {
             Map<String, Object> report = playerReportService.buildReport(uid, playerId);
-            Object latest = report.get("latestSeason");
-            season = latest == null ? null : ((Number) latest).intValue();
+            season = asInteger(report.get("latestSeason"));
         }
         if (season == null) {
             return ResponseEntity.badRequest().body(Map.of("error", "No season data to report on"));

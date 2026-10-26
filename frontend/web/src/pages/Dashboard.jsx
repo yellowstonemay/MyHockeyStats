@@ -1,12 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { Button } from '../components/Button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/Card'
-import { AlertCircle, Loader2, RefreshCw, MessageSquare } from 'lucide-react'
+import { AlertCircle, Eye, Loader2, Lock, RefreshCw, MessageSquare } from 'lucide-react'
 import { integrationsApi } from '../lib/integrationsApi'
 import SeasonsTab from '../components/PlayerProfile/SeasonsTab'
 import StatisticsTab from '../components/StatisticsTab'
 import MhrRankings from '../components/MhrRankings'
-import FollowingTab from '../components/FollowingTab'
 import ActivityFeed from '../components/ActivityFeed'
 import ReportTab from '../components/ReportTab'
 import { careerRowHasStats, isLeaguePlay, leagueOfGame, sourceMeta, sourceOrder } from '../lib/leagues'
@@ -16,7 +15,6 @@ const DASH_TABS = [
   { id: 'seasons', label: 'Seasons', short: 'Seasons', icon: '🏒' },
   { id: 'games', label: 'Game History', short: 'Games', icon: '📝' },
   { id: 'stats', label: 'Statistics', short: 'Stats', icon: '📈' },
-  { id: 'following', label: 'Following', short: 'Following', icon: '👥' },
   { id: 'report', label: 'Report', short: 'Report', icon: '📄', ai: true },
 ]
 
@@ -38,6 +36,14 @@ function sumStats(records) {
 function shortSeason(seasonValue) {
   const m = String(seasonValue ?? '').match(/(\d{4})\D+(\d{4})/)
   return m ? `${m[1]}-${m[2].slice(2)}` : String(seasonValue ?? '')
+}
+
+/**
+ * A FAN link means this login only follows the player, so every tab is
+ * view-only: no manual stat edits, no profile changes.
+ */
+function isFollowOnly(player) {
+  return String(player?.relation || '').toUpperCase() === 'FAN'
 }
 
 // A season belongs to the calendar year it starts in, and the cutover is APRIL —
@@ -261,6 +267,8 @@ export default function Dashboard() {
   }
 
   const selectedPlayer = players.find((player) => String(player.id) === selectedPlayerId) || null
+  const selectedIsFollowOnly = isFollowOnly(selectedPlayer)
+  const selectedReadOnly = !selectedPlayer?.canEdit || selectedIsFollowOnly
 
   const recordKey = (r) => `${r.source || 'src'}|${r.sourcePlayerId || ''}|${r.season || ''}`
 
@@ -354,6 +362,7 @@ export default function Dashboard() {
                     {players.map((player) => (
                       <option key={player.id} value={player.id}>
                         {player.fullName}{player.isPrimary ? ' (Default)' : ''}
+                        {isFollowOnly(player) ? ' — Following' : ''}
                       </option>
                     ))}
                   </select>
@@ -364,8 +373,23 @@ export default function Dashboard() {
                   <span className="font-medium text-slate-900">{selectedPlayer.fullName}</span>
                 </div>
               ) : null}
-              {activeTab === 'following' && (
-                <p className="text-xs text-slate-500">Following is shared across every player on your account.</p>
+
+              {selectedPlayer && (selectedIsFollowOnly || selectedReadOnly) && (
+                <span className="flex items-center gap-2">
+                  {selectedIsFollowOnly && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 border border-indigo-200 text-xs font-medium">
+                      <Eye className="w-3 h-3" /> Following
+                    </span>
+                  )}
+                  {selectedReadOnly && (
+                    <span
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200 text-xs font-medium"
+                      title={selectedIsFollowOnly ? 'You only follow this player — view only' : 'Another account owns this player'}
+                    >
+                      <Lock className="w-3 h-3" /> read-only
+                    </span>
+                  )}
+                </span>
               )}
             </div>
 
@@ -444,8 +468,8 @@ export default function Dashboard() {
                         )}
                         {currentSeasonRows.some((r) => !r.statsKnown) && (
                           <p className="text-[11px] text-slate-400 mt-2">
-                            “—” means that league publishes no per-player scoring for these games — they come
-                            from the team schedule, so only the game count is known.
+                            “—” means the league doesn&apos;t publish individual player scoring for these
+                            games. They come from the team schedule, so only games played are known.
                           </p>
                         )}
                         <p className="text-xs text-slate-500 mt-3">
@@ -456,7 +480,18 @@ export default function Dashboard() {
                   </CardContent>
                 </Card>
 
-                <ActivityFeed playerId={selectedPlayerId} scope="mine" limit={20} />
+                <ActivityFeed
+                  playerId={selectedPlayerId}
+                  scope="mine"
+                  limit={20}
+                  canEdit={!selectedReadOnly}
+                  onSaved={() => {
+                    // A manual game override changes the game rows the league
+                    // breakdown is built from, so re-pull both sources.
+                    loadSeasons(selectedPlayerId)
+                    loadCurrentGames(selectedPlayerId)
+                  }}
+                />
 
                 <MhrRankings playerId={selectedPlayerId} />
 
@@ -662,15 +697,18 @@ export default function Dashboard() {
             )}
 
             {activeTab === 'games' && (
-              <SeasonsTab playerId={selectedPlayerId} canEdit={!!selectedPlayer?.canEdit} />
+              <SeasonsTab
+                playerId={selectedPlayerId}
+                canEdit={!selectedReadOnly}
+                onSaved={() => {
+                  loadSeasons(selectedPlayerId)
+                  loadCurrentGames(selectedPlayerId)
+                }}
+              />
             )}
 
             {activeTab === 'stats' && (
               <StatisticsTab seasonRecords={seasonRecords} playerId={selectedPlayerId} />
-            )}
-
-            {activeTab === 'following' && (
-              <FollowingTab />
             )}
 
             {activeTab === 'report' && (

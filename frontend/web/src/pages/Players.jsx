@@ -4,7 +4,7 @@ import { integrationsApi } from '../lib/integrationsApi'
 import { Button } from '../components/Button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/Card'
 import { Input } from '../components/Input'
-import { ArrowLeft, Plus, RefreshCw, Star, Trash2 } from 'lucide-react'
+import { ArrowLeft, Loader2, Lock, Pencil, RefreshCw, Search, Star, Trash2, UserPlus } from 'lucide-react'
 
 const BIRTH_MONTH_YEAR_REGEX = /^(0[1-9]|1[0-2])\/\d{4}$/
 
@@ -15,14 +15,42 @@ const POSITIONS = [
   { value: 'goaltender', label: 'Goaltender' },
 ]
 
-const RELATIONS = [
-  { value: 'SELF', label: 'This is me' },
-  { value: 'PARENT', label: 'My child' },
-  { value: 'GUARDIAN', label: 'My player' },
-  { value: 'FAN', label: 'Following' },
-]
+// The relation picker is gone: "Me or my kid" is the manual Add-a-player
+// form, and "Following" is its own search-and-add section (the follows table).
+// These values still arrive on legacy profile links.
+const MY_RELATIONS = ['SELF', 'PARENT', 'GUARDIAN']
 
-const emptyForm = { fullName: '', birthMonthYear: '', location: '', position: '', relation: 'SELF' }
+/** A FAN link means the login only follows this player. */
+function isFollowingPlayer(player) {
+  return String(player?.relation || '').toUpperCase() === 'FAN'
+}
+
+/** Small pill used to mark a whole section as editable or view-only. */
+function CardBadge({ icon: Icon, tone = 'slate', children }) {
+  const tones = {
+    slate: 'bg-slate-100 text-slate-600 border-slate-200',
+    green: 'bg-green-100 text-green-800 border-green-200',
+    indigo: 'bg-indigo-100 text-indigo-800 border-indigo-200',
+  }
+  return (
+    <span
+      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-xs font-medium ${tones[tone] || tones.slate}`}
+    >
+      {Icon && <Icon className="w-3 h-3" />}
+      {children}
+    </span>
+  )
+}
+
+const emptyForm = { fullName: '', birthMonthYear: '', location: '', position: '', relation: 'PARENT' }
+
+const SOURCE_META = {
+  AYHL: { label: 'AYHL', color: 'bg-indigo-100 text-indigo-700' },
+  THF: { label: 'THF', color: 'bg-sky-100 text-sky-700' },
+  AHF: { label: 'AHF', color: 'bg-emerald-100 text-emerald-700' },
+  NJHS: { label: 'NJ HS', color: 'bg-amber-100 text-amber-700' },
+  EP: { label: 'Elite Prospects', color: 'bg-purple-100 text-purple-700' },
+}
 
 /**
  * Player management.
@@ -40,6 +68,16 @@ export default function Players() {
 
   const [addForm, setAddForm] = useState(emptyForm)
   const [adding, setAdding] = useState(false)
+
+  // Following: search across AYHL / THF / AHF / NJ HS and add with no other input.
+  const [query, setQuery] = useState('')
+  const [searching, setSearching] = useState(false)
+  const [candidates, setCandidates] = useState([])
+  const [searched, setSearched] = useState(false)
+  const [follows, setFollows] = useState([])
+  const [maxFollows, setMaxFollows] = useState(20)
+  const [followsLoading, setFollowsLoading] = useState(true)
+  const [followBusyKey, setFollowBusyKey] = useState('')
 
   const [editingId, setEditingId] = useState(null)
   const [editForm, setEditForm] = useState(emptyForm)
@@ -61,6 +99,23 @@ export default function Players() {
   useEffect(() => {
     load()
   }, [load])
+
+  const loadFollows = useCallback(async () => {
+    setFollowsLoading(true)
+    try {
+      const resp = await integrationsApi.fetchFollows()
+      setFollows(resp.follows || [])
+      if (resp.maxFollows) setMaxFollows(resp.maxFollows)
+    } catch (err) {
+      setError(err.message || 'Failed to load who you follow')
+    } finally {
+      setFollowsLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadFollows()
+  }, [loadFollows])
 
   const flash = (message) => {
     setNotice(message)
@@ -97,6 +152,63 @@ export default function Players() {
     }
   }
 
+  const handleSearch = async (e) => {
+    e.preventDefault()
+    const q = query.trim()
+    if (q.length < 2) return
+    setSearching(true)
+    setSearched(true)
+    setCandidates([])
+    setError('')
+    try {
+      const resp = await integrationsApi.searchFollows(q)
+      setCandidates(resp.candidates || [])
+    } catch (err) {
+      setError(err.message || 'Search failed')
+    } finally {
+      setSearching(false)
+    }
+  }
+
+  const handleFollow = async (candidate) => {
+    const key = `${candidate.source}:${candidate.sourcePlayerId}`
+    setFollowBusyKey(key)
+    setError('')
+    try {
+      const resp = await integrationsApi.addFollow({
+        source: candidate.source,
+        sourcePlayerId: candidate.sourcePlayerId,
+        playerName: candidate.playerName,
+      })
+      flash(resp.message || 'Following')
+      setCandidates([])
+      setSearched(false)
+      setQuery('')
+      await loadFollows()
+    } catch (err) {
+      setError(err.message || 'Failed to follow')
+    } finally {
+      setFollowBusyKey('')
+    }
+  }
+
+  const handleUnfollow = async (follow) => {
+    const key = `${follow.source}:${follow.sourcePlayerId}`
+    setFollowBusyKey(key)
+    setError('')
+    try {
+      await integrationsApi.deleteFollow(follow.id)
+      flash(`Unfollowed ${follow.playerName || follow.sourcePlayerId}`)
+      await loadFollows()
+    } catch (err) {
+      setError(err.message || 'Failed to unfollow')
+    } finally {
+      setFollowBusyKey('')
+    }
+  }
+
+  const followedKeys = new Set(follows.map((f) => `${f.source}:${f.sourcePlayerId}`))
+
   const startEdit = (player) => {
     setEditingId(player.id)
     setEditForm({
@@ -104,7 +216,7 @@ export default function Players() {
       birthMonthYear: player.birthMonthYear || '',
       location: player.location || '',
       position: player.position || '',
-      relation: player.relation || 'PARENT',
+      relation: 'PARENT',
     })
   }
 
@@ -294,18 +406,33 @@ export default function Players() {
                             {player.location ? ` · ${player.location}` : ''}
                           </p>
                           <p className="text-xs text-slate-500 mt-1">
-                            Owner:{' '}
-                            <span className="font-medium text-slate-700">
-                              {player.ownerEmail || 'not set'}
-                            </span>
-                            {player.canEdit ? (
-                              <span className="ml-2 px-1.5 py-0.5 rounded bg-green-100 text-green-800 border border-green-200">
-                                you can edit
-                              </span>
+                            {isFollowingPlayer(player) ? (
+                              <>
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800 border border-indigo-200">
+                                  Following
+                                </span>
+                                {!player.canEdit && (
+                                  <span className="ml-2 px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
+                                    read-only
+                                  </span>
+                                )}
+                              </>
                             ) : (
-                              <span className="ml-2 px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
-                                read-only
-                              </span>
+                              <>
+                                Owner:{' '}
+                                <span className="font-medium text-slate-700">
+                                  {player.ownerEmail || 'not set'}
+                                </span>
+                                {player.canEdit ? (
+                                  <span className="ml-2 px-1.5 py-0.5 rounded bg-green-100 text-green-800 border border-green-200">
+                                    you can edit
+                                  </span>
+                                ) : (
+                                  <span className="ml-2 px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
+                                    read-only
+                                  </span>
+                                )}
+                              </>
                             )}
                           </p>
                         </div>
@@ -355,14 +482,157 @@ export default function Players() {
           </CardContent>
         </Card>
 
-        {/* ── Add a new player ─────────────────────────────────────────── */}
+        {/* ── Follow a player — search and add, nothing else ────────────── */}
         <Card className="mb-6">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Plus className="w-5 h-5" /> Add a player
+              <UserPlus className="w-5 h-5" /> Follow a player
+              <CardBadge icon={Lock} tone="indigo">read-only</CardBadge>
             </CardTitle>
             <CardDescription>
-              We'll look up this player's leagues and seasons automatically.
+              Search by name across AYHL, THF, AHF and NJ high school hockey, then hit Follow —
+              nothing else to fill in. Followed players are view-only.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleSearch} className="flex flex-col sm:flex-row gap-2">
+              <Input
+                type="text"
+                placeholder="Player name (e.g. Bryan Yang)"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                className="flex-1"
+              />
+              <Button type="submit" variant="secondary" disabled={searching || query.trim().length < 2}>
+                {searching ? (
+                  <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                ) : (
+                  <Search className="w-4 h-4 mr-2" />
+                )}
+                Search
+              </Button>
+            </form>
+
+            {searched && !searching && candidates.length === 0 && (
+              <p className="text-sm text-slate-500 mt-3">
+                No AYHL, THF, AHF or NJ HS match for that name. Try a shorter name or a different
+                spelling.
+              </p>
+            )}
+
+            {candidates.length > 0 && (
+              <div className="mt-3 divide-y divide-slate-100 border border-slate-200 rounded-lg">
+                {candidates.map((c) => {
+                  const meta = SOURCE_META[c.source] || {
+                    label: c.source,
+                    color: 'bg-slate-100 text-slate-600',
+                  }
+                  const key = `${c.source}:${c.sourcePlayerId}`
+                  const already = followedKeys.has(key)
+                  const atCap = !already && follows.length >= maxFollows
+                  return (
+                    <div key={key} className="flex items-center justify-between gap-3 px-3 py-2.5">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${meta.color}`}>
+                            {meta.label}
+                          </span>
+                          <span className="font-medium text-slate-900 text-sm truncate">
+                            {c.playerName}
+                          </span>
+                        </div>
+                        <div className="text-xs text-slate-500 mt-0.5 truncate">
+                          {c.teams || '—'} · {c.seasons} season{c.seasons === 1 ? '' : 's'}
+                        </div>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant={already ? 'outline' : 'default'}
+                        disabled={already || atCap || followBusyKey === key}
+                        onClick={() => handleFollow(c)}
+                      >
+                        {followBusyKey === key ? (
+                          <Loader2 className="w-4 h-4 animate-spin mr-1.5" />
+                        ) : (
+                          <UserPlus className="w-4 h-4 mr-1.5" />
+                        )}
+                        {already ? 'Following' : 'Follow'}
+                      </Button>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {follows.length >= maxFollows && (
+              <p className="text-xs text-amber-600 mt-2">
+                You&apos;ve reached the {maxFollows}-player limit. Unfollow someone to follow more.
+              </p>
+            )}
+
+            {/* Who you follow */}
+            <div className="mt-5">
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="text-sm font-semibold text-slate-700">
+                  Following ({follows.length}/{maxFollows})
+                </h4>
+                <button
+                  type="button"
+                  onClick={loadFollows}
+                  className="text-xs text-primary-600 hover:underline inline-flex items-center gap-1"
+                >
+                  <RefreshCw className="w-3 h-3" /> Refresh
+                </button>
+              </div>
+              {followsLoading ? (
+                <p className="text-sm text-slate-500">Loading…</p>
+              ) : follows.length === 0 ? (
+                <p className="text-sm text-slate-500">You&apos;re not following anyone yet.</p>
+              ) : (
+                <ul className="divide-y divide-slate-200 border border-slate-200 rounded-lg">
+                  {follows.map((f) => {
+                    const meta = SOURCE_META[f.source] || {
+                      label: f.source,
+                      color: 'bg-slate-100 text-slate-600',
+                    }
+                    const key = `${f.source}:${f.sourcePlayerId}`
+                    return (
+                      <li key={f.id} className="flex items-center justify-between gap-3 px-3 py-2.5">
+                        <div className="min-w-0 flex items-center gap-2">
+                          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${meta.color}`}>
+                            {meta.label}
+                          </span>
+                          <span className="font-medium text-slate-900 text-sm truncate">
+                            {f.playerName || f.sourcePlayerId}
+                          </span>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={followBusyKey === key}
+                          onClick={() => handleUnfollow(f)}
+                        >
+                          <Trash2 className="w-4 h-4 mr-1" /> Unfollow
+                        </Button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* ── Add a new player — manual entry only ─────────────────────── */}
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Pencil className="w-5 h-5" /> Own a player
+              <CardBadge icon={Pencil} tone="green">editable</CardBadge>
+            </CardTitle>
+            <CardDescription>
+              Creates a profile you own, so you can edit stats and details — use this for yourself
+              or your kid. We&apos;ll look up their leagues and seasons automatically.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -406,21 +676,6 @@ export default function Players() {
                     {POSITIONS.map((p) => (
                       <option key={p.value} value={p.value}>
                         {p.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="label">Who is this?</label>
-                  <select
-                    className="input appearance-none"
-                    value={addForm.relation}
-                    onChange={(e) => setAddForm({ ...addForm, relation: e.target.value })}
-                    disabled={adding}
-                  >
-                    {RELATIONS.map((r) => (
-                      <option key={r.value} value={r.value}>
-                        {r.label}
                       </option>
                     ))}
                   </select>

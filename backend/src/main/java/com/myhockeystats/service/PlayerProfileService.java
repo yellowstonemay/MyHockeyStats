@@ -56,6 +56,22 @@ public class PlayerProfileService {
         return players;
     }
 
+    /**
+     * playerId -> relation (SELF / PARENT / GUARDIAN / FAN) for every player
+     * attached to this login. The players list needs it to tell a player the
+     * login manages apart from one it only follows.
+     */
+    @Transactional(readOnly = true)
+    public Map<Long, String> relationByPlayerForUser(Long userId) {
+        Map<Long, String> relations = new LinkedHashMap<>();
+        for (UserPlayer link : userPlayerRepository.findByUserId(userId)) {
+            if (link.getPlayer() != null && link.getRelation() != null) {
+                relations.putIfAbsent(link.getPlayer().getId(), link.getRelation());
+            }
+        }
+        return relations;
+    }
+
     /** Whether this login may view this player. */
     @Transactional(readOnly = true)
     public boolean isLinked(Long userId, Long playerId) {

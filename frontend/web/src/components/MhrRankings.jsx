@@ -79,8 +79,8 @@ export default function MhrRankings({ playerId }) {
         <div>
           <CardTitle>Team Ranking</CardTitle>
           <CardDescription>
-            MYHockeyRankings ranks the TEAM, not the player — your team's position in each category, with
-            MHR's week-over-week arrow
+            MYHockeyRankings ranks teams, not individual players. Each row is your team&apos;s place
+            in that category, and the arrow shows movement since last week.
           </CardDescription>
         </div>
         {/* Only the refresh stays: the player report already has its own tab in the

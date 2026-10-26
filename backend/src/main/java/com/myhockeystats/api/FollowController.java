@@ -90,6 +90,19 @@ public class FollowController {
         return userRepository.findByEmail(email);
     }
 
+    /** Cached answer for "does the manual-override table exist yet". */
+    private Boolean overrideTableAvailable;
+
+    private boolean overrideTableAvailable() {
+        if (overrideTableAvailable == null) {
+            Integer found = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = ?",
+                Integer.class, "game_stat_overrides");
+            overrideTableAvailable = found != null && found > 0;
+        }
+        return overrideTableAvailable;
+    }
+
     // ─── name matching (mirrors identity_link.py / CareerLookupService) ───────
     private static String normalizeName(String v) {
         if (v == null || v.isBlank()) return "";
@@ -334,6 +347,9 @@ public class FollowController {
 
         List<Map<String, Object>> entries = new ArrayList<>();
         Timestamp asOf = null;
+        // Manual per-game stats live in game_stat_overrides keyed by profile id, so
+        // they can only be applied to the player being viewed.
+        boolean joinOverrides = includeMine && playerId != null && overrideTableAvailable();
         for (Map.Entry<String, Map<String, PlayerMeta>> srcEntry : players.entrySet()) {
             String source = srcEntry.getKey();
             String table = GAMES.get(source);
@@ -342,16 +358,44 @@ public class FollowController {
             List<String> ids = new ArrayList<>(byId.keySet());
             String placeholders = String.join(",", Collections.nCopies(ids.size(), "?"));
 
-            String sql = "SELECT player_id, game_date, team_for, team_against, goals, assists, points, pim, " +
-                         "game_type, league " +
-                         "FROM " + table + " WHERE player_id IN (" + placeholders + ") " +
-                         "AND game_date IS NOT NULL ORDER BY game_date DESC, game_id DESC LIMIT 30";
+            String overrideJoin = joinOverrides
+                ? " LEFT JOIN game_stat_overrides o ON o.player_profile_id = ? AND o.source = ?"
+                    + " AND o.season_year = t.season_year AND o.game_id = t.game_id"
+                : "";
+            String goalsColumn = joinOverrides ? "COALESCE(o.goals, t.goals)" : "t.goals";
+            String assistsColumn = joinOverrides ? "COALESCE(o.assists, t.assists)" : "t.assists";
+            String pimColumn = joinOverrides ? "COALESCE(o.pim, t.pim)" : "t.pim";
+            String editedColumn = joinOverrides ? ", (o.id IS NOT NULL) AS stats_edited" : ", false AS stats_edited";
+
+            String sql = "SELECT t.player_id, t.game_id, t.season_year, t.game_date, t.team_for, t.team_against,"
+                + " " + goalsColumn + " AS goals, " + assistsColumn + " AS assists, t.points AS scraped_points,"
+                + " " + pimColumn + " AS pim, t.game_type, t.league" + editedColumn
+                + " FROM " + table + " t" + overrideJoin
+                + " WHERE t.player_id IN (" + placeholders + ")"
+                + " AND t.game_date IS NOT NULL ORDER BY t.game_date DESC, t.game_id DESC LIMIT 30";
+
+            List<Object> params = new ArrayList<>();
+            if (joinOverrides) {
+                params.add(playerId);
+                params.add(source);
+            }
+            params.addAll(ids);
+
             List<Map<String, Object>> rows = jdbcTemplate.query(sql,
+                ps -> {
+                    for (int i = 0; i < params.size(); i++) {
+                        ps.setObject(i + 1, params.get(i));
+                    }
+                },
                 (rs, rn) -> {
                     String pid = rs.getString("player_id");
                     PlayerMeta meta = byId.get(pid);
                     Map<String, Object> m = new HashMap<>();
                     m.put("source", source);
+                    // The (source, seasonYear, gameId) triple keys a manual override,
+                    // so the feed can edit a game the same way Game History does.
+                    m.put("gameId", rs.getString("game_id"));
+                    m.put("seasonYear", (Integer) rs.getObject("season_year"));
                     m.put("league", rs.getString("league"));
                     m.put("gameType", rs.getString("game_type"));
                     m.put("playerName", meta == null ? pid : meta.name());
@@ -359,12 +403,21 @@ public class FollowController {
                     m.put("date", rs.getDate("game_date") == null ? null : rs.getDate("game_date").toString());
                     m.put("teamFor", rs.getString("team_for"));
                     m.put("opponent", rs.getString("team_against"));
-                    m.put("goals", rs.getInt("goals"));
-                    m.put("assists", rs.getInt("assists"));
-                    m.put("points", rs.getInt("points"));
-                    m.put("pim", rs.getInt("pim"));
+                    Integer goals = (Integer) rs.getObject("goals");
+                    Integer assists = (Integer) rs.getObject("assists");
+                    boolean edited = rs.getBoolean("stats_edited");
+                    Integer points = (Integer) rs.getObject("scraped_points");
+                    // A manual entry replaces the scraped value; recompute points from it.
+                    if (edited && (goals != null || assists != null)) {
+                        points = (goals == null ? 0 : goals) + (assists == null ? 0 : assists);
+                    }
+                    m.put("goals", goals);
+                    m.put("assists", assists);
+                    m.put("points", points);
+                    m.put("pim", (Integer) rs.getObject("pim"));
+                    m.put("statsEdited", edited);
                     return m;
-                }, ids.toArray());
+                });
             entries.addAll(rows);
 
             // Freshness: last scrape for these players in this source.
@@ -384,6 +437,8 @@ public class FollowController {
             for (MhrGameLookupService.MhrGame g : mhrGames) {
                 Map<String, Object> m = new HashMap<>();
                 m.put("source", "MHR");
+                m.put("gameId", g.gameId());
+                m.put("seasonYear", g.seasonYear());
                 // The division names the league that runs the game ("AYHL 11U AAA"),
                 // and the type says whether it was league play or an extra — the feed
                 // badges a league game with its league instead of the generic MHR.
@@ -401,6 +456,7 @@ public class FollowController {
                 m.put("assists", g.assists());
                 m.put("points", g.points());
                 m.put("pim", g.pim());
+                m.put("statsEdited", g.statsEdited());
                 entries.add(m);
             }
             Instant scraped = mhrGameLookupService.lastScrapedAt(player.getId(), player.getFullName());

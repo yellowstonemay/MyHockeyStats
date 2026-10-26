@@ -342,7 +342,10 @@ def confirm_from_candidate_links(client, conn, player: dict, season_year: int,
         for club in clubs:
             confidence, overlap = score_candidate(club["club"], club["league"], name, division)
             if is_confident(club["club"], club["league"], name, division):
-                exact_age = f"{age}u" in age_group_tokens(f"{name} {division or ''}") if age is not None else False
+                age_tokens = age_group_tokens(f"{name} {division or ''}")
+                # Teams that state no age group are not blocked; otherwise only
+                # the player's exact age may count as an exact match.
+                exact_age = (not age_tokens) or (age is not None and f"{age}u" in age_tokens)
                 print(f"    candidate t={cand['team_id']} {name} | {division or '?'} | "
                       f"club '{club['club']}' overlap={overlap:.2f} confidence={confidence}"
                       f"{' exact age' if exact_age else ''} -> valid")
@@ -357,8 +360,10 @@ def confirm_from_candidate_links(client, conn, player: dict, season_year: int,
                     "_exact_age": exact_age,
                 })
                 break
-    # Prefer the candidate whose age group is exactly the player's; a ±1U team may
-    # be a sibling/reclassified team, so it only decides when it is the sole match.
+    # Only the player's EXACT age group may be auto-confirmed. A ±1U team is a
+    # different age group (sibling / reclassified / playing up) and must never be
+    # confirmed automatically: doing so imports games the player never played.
+    # It stays a candidate for a user/admin decision or a team_links.json override.
     exact = [m for m in matches if m["_exact_age"]]
     for m in matches:
         m.pop("_exact_age", None)
@@ -366,14 +371,10 @@ def confirm_from_candidate_links(client, conn, player: dict, season_year: int,
         print(f"    confirmed t={exact[0]['team_id']} {exact[0]['team_name']} "
               f"| {exact[0]['division'] or '?'}")
         return exact[0]
-    if len(matches) == 1:
-        print(f"    confirmed t={matches[0]['team_id']} {matches[0]['team_name']} "
-              f"| {matches[0]['division'] or '?'}")
-        return matches[0]
     if matches:
-        print(f"    {len(matches)} candidates look valid "
-              f"({', '.join(m['team_name'] for m in matches)}) -> left as candidates "
-              f"(ambiguous; needs a user/admin decision or a team_links.json override)")
+        print(f"    {len(matches)} candidate(s) matched the club/league but none is the "
+              f"player's exact {age}U age group -> left as candidates "
+              f"(needs a user/admin decision or a team_links.json override)")
     return None
 
 
@@ -425,6 +426,9 @@ def resolve_player(client, conn, player: dict, season_year: int, overrides: dict
     for club in clubs:
         print(f"  {player['full_name']}: club '{club['club']}' ({club['source']}) -> {age}U")
         for age_try in (age, age + 1, age - 1):
+            # Only the player's own age may be auto-confirmed; ±1U hits stay
+            # candidates so a search hiccup can't attach a wrong-age team.
+            exact_age = age_try == age
             hits = search_ladder(client, club["club"], age_try, budget)
             if not hits:
                 continue
@@ -446,8 +450,9 @@ def resolve_player(client, conn, player: dict, season_year: int, overrides: dict
                     "source_league": club["source"],
                     "match_method": "auto",
                     "confidence_score": confidence,
-                    "link_state": "confirmed" if is_confident(
-                        club["club"], club["league"], name, division
+                    "link_state": "confirmed" if (
+                        exact_age and is_confident(
+                            club["club"], club["league"], name, division)
                     ) else "candidate",
                 }
                 print(f"    t={hit['team_id']} {name} | {division or '?'} | "

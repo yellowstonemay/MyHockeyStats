@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend,
   CartesianGrid, LineChart, Line,
@@ -15,6 +15,15 @@ const SOURCE_LABELS = {
   MHR: 'MHR',
 }
 
+const LEAGUE_COLORS = {
+  AYHL: '#6366f1',
+  THF: '#38bdf8',
+  AHF: '#34d399',
+  NJHS: '#f59e0b',
+  MHR: '#a78bfa',
+  Unknown: '#94a3b8',
+}
+
 function seasonStartYear(seasonValue) {
   if (seasonValue == null) return 0
   const m = String(seasonValue).match(/(\d{4})/)
@@ -25,15 +34,13 @@ function cleanOpponent(opp) {
   return String(opp || 'Unknown').replace(/^(vs\.?|@)\s*/i, '').trim() || 'Unknown'
 }
 
-function fmt(n) {
-  return Number(n ?? 0).toFixed(2)
-}
-
 export default function StatisticsTab({ seasonRecords, playerId }) {
   const [gameHistory, setGameHistory] = useState([])
   const [loadingGames, setLoadingGames] = useState(true)
+  const [initialLoading, setInitialLoading] = useState(true)
   const [gamesError, setGamesError] = useState('')
   const [selectedSeason, setSelectedSeason] = useState('')
+  const [availableSeasons, setAvailableSeasons] = useState([])
   const [rankings, setRankings] = useState([])
   const [loadingRankings, setLoadingRankings] = useState(true)
   const [rankingsError, setRankingsError] = useState('')
@@ -59,26 +66,47 @@ export default function StatisticsTab({ seasonRecords, playerId }) {
 
   const closeTeam = () => setTeamModal(null)
 
+  // Season key already loaded, so picking a season does not refetch
+  // the season the API defaulted to.
+  const loadedKeyRef = useRef(null)
+
   useEffect(() => {
+    const key = `${playerId ?? ''}|${selectedSeason}`
+    if (loadedKeyRef.current === key) return
+    loadedKeyRef.current = key
+
     let cancelled = false
     setLoadingGames(true)
     setGamesError('')
     integrationsApi
-      .fetchMyGameHistory('', playerId)
+      .fetchMyGameHistory(selectedSeason, playerId)
       .then((resp) => {
         if (cancelled) return
         setGameHistory(resp.games || [])
         const seasons = resp.availableSeasons || []
-        if (seasons.length && !selectedSeason) {
-          setSelectedSeason(String(seasons[0].seasonYear))
-        }
+        setAvailableSeasons(seasons)
+        const next = selectedSeason || (seasons.length ? String(seasons[0].seasonYear) : '')
+        loadedKeyRef.current = `${playerId ?? ''}|${next}`
+        if (next && next !== selectedSeason) setSelectedSeason(next)
       })
       .catch((err) => {
         if (!cancelled) setGamesError(err.message || 'Failed to load game history')
       })
       .finally(() => {
-        if (!cancelled) setLoadingGames(false)
+        if (!cancelled) {
+          setLoadingGames(false)
+          setInitialLoading(false)
+        }
       })
+    return () => {
+      cancelled = true
+    }
+  }, [playerId, selectedSeason])
+
+  useEffect(() => {
+    let cancelled = false
+    setLoadingRankings(true)
+    setRankingsError('')
     integrationsApi
       .fetchRankings(playerId)
       .then((resp) => {
@@ -93,7 +121,6 @@ export default function StatisticsTab({ seasonRecords, playerId }) {
     return () => {
       cancelled = true
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playerId])
 
   // ── Career cards ────────────────────────────────────────────────────────
@@ -130,20 +157,37 @@ export default function StatisticsTab({ seasonRecords, playerId }) {
       .map((d) => ({ ...d, ppg: d.games ? Number((d.points / d.games).toFixed(2)) : 0 }))
   }, [seasonRecords])
 
-  // ── League split ────────────────────────────────────────────────────────
-  const leagueSplit = useMemo(() => {
-    const map = {}
+  // ── League trend: points-per-game per season year, one bar per league ───
+  const leagueTrend = useMemo(() => {
+    const byYear = {}
     seasonRecords.forEach((r) => {
+      const year = seasonStartYear(r.season)
+      if (!year) return
       const src = r.source || 'Unknown'
-      if (!map[src]) map[src] = { league: SOURCE_LABELS[src] || src, source: src, seasons: 0, games: 0, goals: 0, assists: 0, points: 0, pim: 0 }
-      map[src].seasons += 1
-      map[src].games += r.gamesPlayed ?? 0
-      map[src].goals += r.goals ?? 0
-      map[src].assists += r.assists ?? 0
-      map[src].points += r.points ?? 0
-      map[src].pim += r.pim ?? 0
+      const row = byYear[year] || (byYear[year] = { year })
+      row[`${src}__pts`] = (row[`${src}__pts`] || 0) + (r.points ?? 0)
+      row[`${src}__gp`] = (row[`${src}__gp`] || 0) + (r.gamesPlayed ?? 0)
     })
-    return Object.values(map).sort((a, b) => b.games - a.games)
+    return Object.values(byYear)
+      .sort((a, b) => a.year - b.year)
+      .map((row) => {
+        const out = { year: row.year }
+        Object.keys(row).forEach((k) => {
+          if (!k.endsWith('__pts')) return
+          const src = k.slice(0, -'__pts'.length)
+          const gp = row[`${src}__gp`] || 0
+          out[src] = gp ? Number((row[k] / gp).toFixed(2)) : null
+          out[`${src}__gp`] = gp
+          out[`${src}__pts`] = row[k]
+        })
+        return out
+      })
+  }, [seasonRecords])
+
+  const leagueSources = useMemo(() => {
+    const seen = new Set()
+    seasonRecords.forEach((r) => { if (r.source) seen.add(r.source) })
+    return Array.from(seen)
   }, [seasonRecords])
 
   // ── Game-level stats (from game history) ────────────────────────────────
@@ -153,8 +197,9 @@ export default function StatisticsTab({ seasonRecords, playerId }) {
 
   const seasonOptions = useMemo(() => {
     const map = {}
-    sortedGames.forEach((g) => {
-      if (g.seasonYear != null) map[g.seasonYear] = g.seasonYear
+    availableSeasons.forEach((s) => {
+      const year = Number(s.seasonYear)
+      if (Number.isFinite(year) && year > 0) map[year] = year
     })
     return Object.keys(map)
       .map(Number)
@@ -178,35 +223,6 @@ export default function StatisticsTab({ seasonRecords, playerId }) {
     }))
   }, [selectedSeasonGames])
 
-  const pointsDistribution = useMemo(() => {
-    const dist = [0, 0, 0, 0] // 0, 1, 2, 3+
-    sortedGames.forEach((g) => {
-      const p = g.points ?? 0
-      if (p >= 3) dist[3] += 1
-      else dist[p] += 1
-    })
-    return [
-      { label: '0 pts', value: dist[0] },
-      { label: '1 pt', value: dist[1] },
-      { label: '2 pts', value: dist[2] },
-      { label: '3+ pts', value: dist[3] },
-    ]
-  }, [sortedGames])
-
-  const streaks = useMemo(() => {
-    let cur = 0
-    let best = 0
-    sortedGames.forEach((g) => {
-      if ((g.points ?? 0) > 0) {
-        cur += 1
-        best = Math.max(best, cur)
-      } else {
-        cur = 0
-      }
-    })
-    return { longest: best, total: sortedGames.length }
-  }, [sortedGames])
-
   const topOpponents = useMemo(() => {
     const map = {}
     sortedGames.forEach((g) => {
@@ -220,11 +236,7 @@ export default function StatisticsTab({ seasonRecords, playerId }) {
       .slice(0, 8)
   }, [sortedGames])
 
-  const multiPointGames = useMemo(() => {
-    return sortedGames.filter((g) => (g.points ?? 0) >= 2).length
-  }, [sortedGames])
-
-  // ── Milestones & streaks ────────────────────────────────────────────────
+  // ── Milestones ──────────────────────────────────────────────────────────
   const nextMilestone = (value, list) => {
     const next = (list || []).find((m) => value < m)
     return next ? { next, remaining: next - value } : null
@@ -235,27 +247,16 @@ export default function StatisticsTab({ seasonRecords, playerId }) {
     assists: nextMilestone(career.assists, [50, 100, 250]),
   }), [career])
 
-  const currentStreak = useMemo(() => {
-    let streak = 0
-    for (let i = sortedGames.length - 1; i >= 0; i--) {
-      if ((sortedGames[i].points ?? 0) > 0) streak += 1
-      else break
-    }
-    return streak
-  }, [sortedGames])
-
   const gameHighlights = useMemo(() => {
     let bestPoints = 0
     let bestGoals = 0
-    let hatTricks = 0
     sortedGames.forEach((g) => {
       const p = g.points ?? 0
       const gl = g.goals ?? 0
       if (p > bestPoints) bestPoints = p
       if (gl > bestGoals) bestGoals = gl
-      if (gl >= 3) hatTricks += 1
     })
-    return { bestPoints, bestGoals, hatTricks }
+    return { bestPoints, bestGoals }
   }, [sortedGames])
 
   const ppgCareer = career.games ? Number((career.points / career.games).toFixed(2)) : 0
@@ -290,7 +291,7 @@ export default function StatisticsTab({ seasonRecords, playerId }) {
     )
   }
 
-  if (loadingGames) {
+  if (initialLoading) {
     return (
       <div className="flex items-center justify-center py-16 text-slate-500">
         <Loader2 className="w-5 h-5 animate-spin mr-2" />
@@ -299,7 +300,7 @@ export default function StatisticsTab({ seasonRecords, playerId }) {
     )
   }
 
-  if (gamesError) {
+  if (gamesError && gameHistory.length === 0) {
     return (
       <Card>
         <CardContent>
@@ -324,6 +325,98 @@ export default function StatisticsTab({ seasonRecords, playerId }) {
         <StatCard label="Points / Game" value={ppgCareer.toFixed(2)} />
       </div>
 
+      {/* ── This season: both cards follow the selector below ─────────── */}
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2 pt-2">
+        <div>
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">This season</h2>
+          <p className="text-xs text-slate-400">Both charts below follow the season you pick</p>
+        </div>
+        <label className="flex items-center gap-2 text-sm text-slate-600">
+          <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Season</span>
+          <select
+            value={selectedSeason}
+            onChange={(e) => setSelectedSeason(e.target.value)}
+            className="text-sm border border-slate-300 rounded-md px-3 py-1.5 bg-white"
+            aria-label="Season filter"
+          >
+            {seasonOptions.length === 0 && <option value="">All seasons</option>}
+            {seasonOptions.map((y) => (
+              <option key={y} value={y}>
+                {y}-{y + 1}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Game-by-game */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Game-by-Game</CardTitle>
+            <CardDescription>
+              Goals and assists in each game
+              {loadingGames && <span className="ml-2 text-slate-400">loading…</span>}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {perGameChart.length === 0 ? (
+              <p className="text-slate-500 text-sm text-center py-8">No game-by-game data yet.</p>
+            ) : (
+              <div className="h-56 sm:h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={perGameChart} margin={{ top: 8, right: 8, left: -20, bottom: 12 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                    <XAxis dataKey="idx" tick={{ fontSize: 11 }} interval="preserveStartEnd" label={{ value: 'Game', position: 'insideBottom', offset: -6, fontSize: 11 }} />
+                    <YAxis tick={{ fontSize: 11 }} allowDecimals={false} label={{ value: 'Points', angle: -90, position: 'insideLeft', fontSize: 11 }} />
+                    <Tooltip
+                      labelFormatter={(v, p) => {
+                        const row = p && p[0] ? p[0].payload : null
+                        return row ? `${row.date} (game ${v})` : `Game ${v}`
+                      }}
+                    />
+                    <Legend wrapperStyle={{ fontSize: 12 }} />
+                    <Bar dataKey="goals" name="Goals" stackId="a" fill="#6366f1" />
+                    <Bar dataKey="assists" name="Assists" stackId="a" fill="#38bdf8" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Best opponents */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Best Opponents</CardTitle>
+            <CardDescription>Most points scored against one team</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {topOpponents.length === 0 ? (
+              <p className="text-slate-500 text-sm text-center py-8">No games in this season yet.</p>
+            ) : (
+              <div className="h-56 sm:h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={topOpponents} layout="vertical" margin={{ top: 4, right: 20, left: 8, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                    <XAxis type="number" tick={{ fontSize: 12 }} allowDecimals={false} />
+                    <YAxis type="category" dataKey="opponent" tick={{ fontSize: 11 }} width={110} />
+                    <Tooltip />
+                    <Bar dataKey="points" name="Points" fill="#34d399" radius={[0, 4, 4, 0]} maxBarSize={26} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* ── Career: aggregates across every season ────────────────────── */}
+      <div className="pt-2">
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Career</h2>
+        <p className="text-xs text-slate-400">All seasons combined — not affected by the season selector</p>
+      </div>
+
       {/* Milestones & streaks */}
       <Card>
         <CardHeader>
@@ -331,7 +424,7 @@ export default function StatisticsTab({ seasonRecords, playerId }) {
           <CardDescription>Career milestones and hot streaks</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="border border-slate-200 rounded-lg p-3">
               <div className="text-xs text-slate-500">Next milestone</div>
               {milestones.points ? (
@@ -350,49 +443,109 @@ export default function StatisticsTab({ seasonRecords, playerId }) {
               ) : null}
             </div>
             <div className="border border-slate-200 rounded-lg p-3">
-              <div className="text-xs text-slate-500">Current point streak</div>
-              <div className="mt-1 text-2xl font-bold text-slate-900">{currentStreak}</div>
-              <div className="text-[11px] text-slate-400">best {streaks.longest}</div>
-            </div>
-            <div className="border border-slate-200 rounded-lg p-3">
               <div className="text-xs text-slate-500">Best game</div>
               <div className="mt-1 text-2xl font-bold text-slate-900">{gameHighlights.bestPoints} pts</div>
               <div className="text-[11px] text-slate-400">{gameHighlights.bestGoals} goals</div>
-            </div>
-            <div className="border border-slate-200 rounded-lg p-3">
-              <div className="text-xs text-slate-500">Hat tricks</div>
-              <div className="mt-1 text-2xl font-bold text-slate-900">{gameHighlights.hatTricks}</div>
-              <div className="text-[11px] text-slate-400">{multiPointGames} multi-pt games</div>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* Season-over-season trend */}
-      {seasonTrends.length > 0 && (
+      {/* Trends */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {seasonTrends.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Season-over-Season</CardTitle>
+              <CardDescription>Goals, assists, and points per season (all leagues combined)</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="h-56 sm:h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={seasonTrends} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                    <XAxis dataKey="label" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
+                    <YAxis tick={{ fontSize: 12 }} />
+                    <Tooltip />
+                    <Legend wrapperStyle={{ fontSize: 12 }} />
+                    <Bar dataKey="goals" name="Goals" stackId="a" fill="#6366f1" />
+                    <Bar dataKey="assists" name="Assists" stackId="a" fill="#38bdf8" />
+                    <Line type="monotone" dataKey="ppg" name="PTS/Game" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Points per game by league */}
         <Card>
           <CardHeader>
-            <CardTitle>Season-over-Season</CardTitle>
-            <CardDescription>Goals, assists, and points per season (all leagues combined)</CardDescription>
+            <CardTitle>Points per Game</CardTitle>
+            <CardDescription>Season average (points ÷ games), one bar per league</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="h-48 sm:h-72">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={seasonTrends} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis dataKey="label" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
-                  <YAxis tick={{ fontSize: 12 }} />
-                  <Tooltip />
-                  <Legend wrapperStyle={{ fontSize: 12 }} />
-                  <Bar dataKey="goals" name="Goals" stackId="a" fill="#6366f1" />
-                  <Bar dataKey="assists" name="Assists" stackId="a" fill="#38bdf8" />
-                  <Line type="monotone" dataKey="ppg" name="PTS/Game" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
+            {leagueTrend.length === 0 ? (
+              <p className="text-sm text-slate-500 py-10 text-center">No season data yet.</p>
+            ) : (
+              <div className="h-56 sm:h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={leagueTrend}
+                    margin={{ top: 4, right: 16, left: 0, bottom: 0 }}
+                    barGap={2}
+                    barCategoryGap="22%"
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                    <XAxis dataKey="year" tick={{ fontSize: 12 }} tickMargin={6} />
+                    <YAxis
+                      tick={{ fontSize: 12 }}
+                      width={38}
+                      domain={[0, 'auto']}
+                      tickFormatter={(v) => Number(v).toFixed(1)}
+                    />
+                    <Tooltip
+                      cursor={{ fill: '#f1f5f9' }}
+                      content={({ active, payload, label }) => {
+                        if (!active || !payload || !payload.length) return null
+                        return (
+                          <div className="bg-white border border-slate-200 rounded shadow-sm px-3 py-2 text-xs">
+                            <div className="font-semibold text-slate-700 mb-1">
+                              Season {label}–{Number(label) + 1}
+                            </div>
+                            {payload.map((p) => (
+                              <div key={p.dataKey} className="flex items-center gap-2 whitespace-nowrap">
+                                <span className="w-2 h-2 rounded-full shrink-0" style={{ background: p.fill || p.color }} />
+                                <span className="text-slate-600">{SOURCE_LABELS[p.dataKey] || p.dataKey}</span>
+                                <span className="font-medium">{Number(p.value).toFixed(2)} P/GP</span>
+                                <span className="text-slate-400">
+                                  ({p.payload[`${p.dataKey}__gp`]} GP · {p.payload[`${p.dataKey}__pts`]} P)
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )
+                      }}
+                    />
+                    <Legend wrapperStyle={{ fontSize: 12 }} formatter={(name) => SOURCE_LABELS[name] || name} />
+                    {leagueSources.map((src) => (
+                      <Bar
+                        key={src}
+                        dataKey={src}
+                        name={src}
+                        fill={LEAGUE_COLORS[src] || LEAGUE_COLORS.Unknown}
+                        maxBarSize={22}
+                        radius={[3, 3, 0, 0]}
+                      />
+                    ))}
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+            <p className="text-xs text-slate-500 mt-2">Scoring rate each season, split by league.</p>
           </CardContent>
         </Card>
-      )}
+      </div>
 
       {/* Team / league rankings */}
       <Card>
@@ -487,142 +640,6 @@ export default function StatisticsTab({ seasonRecords, playerId }) {
         </CardContent>
       </Card>
 
-      {/* Per-season game chart */}
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <div>
-            <CardTitle>Game-by-Game</CardTitle>
-            <CardDescription>Points per game for the selected season</CardDescription>
-          </div>
-          <select
-            value={selectedSeason}
-            onChange={(e) => setSelectedSeason(e.target.value)}
-            className="text-sm border border-slate-300 rounded-md px-3 py-1.5 bg-white"
-          >
-            {seasonOptions.length === 0 && <option value="">All seasons</option>}
-            {seasonOptions.map((y) => (
-              <option key={y} value={y}>
-                {y}-{y + 1}
-              </option>
-            ))}
-          </select>
-        </CardHeader>
-        <CardContent>
-          {perGameChart.length === 0 ? (
-            <p className="text-slate-500 text-sm text-center py-8">No game-by-game data yet.</p>
-          ) : (
-            <div className="h-48 sm:h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={perGameChart} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis dataKey="idx" tick={{ fontSize: 11 }} interval="preserveStartEnd" label={{ value: 'Game', position: 'insideBottom', offset: -2, fontSize: 11 }} />
-                  <YAxis tick={{ fontSize: 11 }} />
-                  <Tooltip
-                    labelFormatter={(v, p) => {
-                      const row = p && p[0] ? p[0].payload : null
-                      return row ? `${row.date} (game ${v})` : `Game ${v}`
-                    }}
-                  />
-                  <Legend wrapperStyle={{ fontSize: 12 }} />
-                  <Bar dataKey="goals" name="Goals" stackId="a" fill="#6366f1" />
-                  <Bar dataKey="assists" name="Assists" stackId="a" fill="#38bdf8" />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Points distribution */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Points per Game</CardTitle>
-            <CardDescription>How often you hit 0, 1, 2, or 3+ points</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="h-52">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={pointsDistribution} layout="vertical" margin={{ top: 4, right: 16, left: 8, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis type="number" allowDecimals={false} tick={{ fontSize: 12 }} />
-                  <YAxis type="category" dataKey="label" tick={{ fontSize: 12 }} width={48} />
-                  <Tooltip />
-                  <Bar dataKey="value" name="Games" fill="#a78bfa" radius={[0, 4, 4, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-            <p className="text-sm text-slate-600 mt-2">
-              <strong>{multiPointGames}</strong> multi-point game{(multiPointGames === 1 ? '' : 's')} · longest point streak{' '}
-              <strong>{streaks.longest}</strong>
-            </p>
-          </CardContent>
-        </Card>
-
-        {/* League split */}
-        <Card>
-          <CardHeader>
-            <CardTitle>By League</CardTitle>
-            <CardDescription>Career breakdown per source</CardDescription>
-          </CardHeader>
-          <CardContent className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-slate-500 border-b border-slate-200">
-                  <th className="text-left py-2">League</th>
-                  <th className="text-right">Seas</th>
-                  <th className="text-right">GP</th>
-                  <th className="text-right">G</th>
-                  <th className="text-right">A</th>
-                  <th className="text-right">PTS</th>
-                  <th className="text-right">P/GP</th>
-                </tr>
-              </thead>
-              <tbody>
-                {leagueSplit.map((l) => (
-                  <tr key={l.source} className="border-b border-slate-100">
-                    <td className="py-2 font-medium">{l.league}</td>
-                    <td className="text-right">{l.seasons}</td>
-                    <td className="text-right">{l.games}</td>
-                    <td className="text-right">{l.goals}</td>
-                    <td className="text-right">{l.assists}</td>
-                    <td className="text-right font-medium">{l.points}</td>
-                    <td className="text-right">{l.games ? fmt(l.points / l.games) : '—'}</td>
-                  </tr>
-                ))}
-                {leagueSplit.length === 0 && (
-                  <tr>
-                    <td colSpan={7} className="py-4 text-center text-slate-500">No season data yet.</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Top opponents */}
-      {topOpponents.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Best Opponents</CardTitle>
-            <CardDescription>Most points scored against a single team</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="h-56">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={topOpponents} layout="vertical" margin={{ top: 4, right: 20, left: 8, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis type="number" tick={{ fontSize: 12 }} />
-                  <YAxis type="category" dataKey="opponent" tick={{ fontSize: 11 }} width={120} />
-                  <Tooltip />
-                  <Bar dataKey="points" name="Points" fill="#34d399" radius={[0, 4, 4, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </CardContent>
-        </Card>
-      )}
 
       {/* Team roster modal */}
       {teamModal && (

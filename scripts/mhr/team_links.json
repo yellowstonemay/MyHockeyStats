@@ -6,5 +6,13 @@
       "division": "AYHL 15U AAA Premier",
       "league": "AYHL"
     }
+  },
+  "8": {
+    "2026": {
+      "team_id": "1205",
+      "team_name": "New Jersey Colonials 11U AAA",
+      "division": "AYHL 11U AAA",
+      "league": "AYHL"
+    }
   }
 }

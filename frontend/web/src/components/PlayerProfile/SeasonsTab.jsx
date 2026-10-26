@@ -1,19 +1,24 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { integrationsApi } from '../../lib/integrationsApi'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../Card'
 import { Button } from '../Button'
 import { AlertCircle, Loader2, RefreshCw, Download, FileText, Pencil, RotateCcw, X } from 'lucide-react'
 
-export default function SeasonsTab({ playerId, canEdit = false }) {
+export default function SeasonsTab({ playerId, canEdit = false, onSaved }) {
   const [games, setGames] = useState([])
   const [availableSeasons, setAvailableSeasons] = useState([])
   const [selectedSeason, setSelectedSeason] = useState('')
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState('')
   const [editingKey, setEditingKey] = useState(null)
   const [editValues, setEditValues] = useState({})
-  const [saving, setSaving] = useState(false)
+  const [savingKey, setSavingKey] = useState(null)
   const [feedback, setFeedback] = useState('')
+
+  // Only the very first fetch may blank the table; later ones (season change,
+  // save, reset) refresh in place so the rows never disappear mid-edit.
+  const firstLoadRef = useRef(true)
 
   const gameKey = (game) => `${game.source}|${game.seasonYear}|${game.gameId}`
 
@@ -22,7 +27,8 @@ export default function SeasonsTab({ playerId, canEdit = false }) {
   }, [playerId])
 
   const loadGameHistory = async (seasonYear = '') => {
-    setLoading(true)
+    if (firstLoadRef.current) setLoading(true)
+    else setRefreshing(true)
     setError('')
     try {
       const response = await integrationsApi.fetchMyGameHistory(seasonYear, playerId)
@@ -32,7 +38,9 @@ export default function SeasonsTab({ playerId, canEdit = false }) {
     } catch (err) {
       setError(err.message || 'Failed to load game history')
     } finally {
+      firstLoadRef.current = false
       setLoading(false)
+      setRefreshing(false)
     }
   }
 
@@ -62,7 +70,11 @@ export default function SeasonsTab({ playerId, canEdit = false }) {
   }
 
   const saveEdit = async (game) => {
-    setSaving(true)
+    if (game.gameId == null || game.seasonYear == null) {
+      setFeedback('This game has no id or season, so its stats cannot be overridden.')
+      return
+    }
+    setSavingKey(gameKey(game))
     setFeedback('')
     try {
       await integrationsApi.saveGameStats(playerId, {
@@ -76,15 +88,16 @@ export default function SeasonsTab({ playerId, canEdit = false }) {
       cancelEdit()
       setFeedback('Saved. These numbers now override the scraped ones.')
       await loadGameHistory(selectedSeason)
+      if (onSaved) onSaved()
     } catch (err) {
       setFeedback(err.message || 'Failed to save the game stats')
     } finally {
-      setSaving(false)
+      setSavingKey(null)
     }
   }
 
   const resetStats = async (game) => {
-    setSaving(true)
+    setSavingKey(gameKey(game))
     setFeedback('')
     try {
       const response = await integrationsApi.resetGameStats(playerId, {
@@ -94,10 +107,11 @@ export default function SeasonsTab({ playerId, canEdit = false }) {
       })
       setFeedback(response.message || 'Manual stats cleared.')
       await loadGameHistory(selectedSeason)
+      if (onSaved) onSaved()
     } catch (err) {
       setFeedback(err.message || 'Failed to clear the manual stats')
     } finally {
-      setSaving(false)
+      setSavingKey(null)
     }
   }
 
@@ -274,21 +288,28 @@ export default function SeasonsTab({ playerId, canEdit = false }) {
         )}
 
         {loading && (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="w-6 h-6 animate-spin text-primary-600">
-              <span className="ml-2">Loading game history...</span>
-            </Loader2>
+          <div className="flex items-center justify-center py-12 gap-2">
+            <Loader2 className="w-6 h-6 animate-spin text-primary-600" />
+            <span className="ml-2 text-slate-600">Loading game history...</span>
           </div>
         )}
 
         {!loading && availableSeasons.length > 0 && (
           <div className="mb-6 flex flex-col md:flex-row md:items-end gap-3">
             <div className="flex-1">
-              <label className="label">Season</label>
+              <label className="label">
+                Season
+                {refreshing && (
+                  <span className="ml-2 inline-flex items-center gap-1 text-xs font-normal text-slate-400">
+                    <Loader2 className="w-3 h-3 animate-spin" /> refreshing…
+                  </span>
+                )}
+              </label>
               <select
                 value={selectedSeason}
                 onChange={handleSeasonChange}
                 className="input appearance-none"
+                disabled={refreshing}
               >
                 {availableSeasons.map((season) => (
                   <option key={season.seasonYear} value={season.seasonYear}>
@@ -391,10 +412,10 @@ export default function SeasonsTab({ playerId, canEdit = false }) {
                           <td className="px-3 py-2 text-right whitespace-nowrap">
                             {isEditing ? (
                               <span className="inline-flex gap-1 items-center">
-                                <Button size="sm" onClick={() => saveEdit(game)} disabled={saving}>
-                                  {saving ? 'Saving...' : 'Save'}
+                                <Button size="sm" onClick={() => saveEdit(game)} disabled={savingKey === gameKey(game)}>
+                                  {savingKey === gameKey(game) ? 'Saving...' : 'Save'}
                                 </Button>
-                                <Button size="sm" variant="outline" onClick={cancelEdit} disabled={saving}>
+                                <Button size="sm" variant="outline" onClick={cancelEdit} disabled={savingKey === gameKey(game)}>
                                   Cancel
                                 </Button>
                               </span>
@@ -417,7 +438,7 @@ export default function SeasonsTab({ playerId, canEdit = false }) {
                                     <button
                                       type="button"
                                       onClick={() => resetStats(game)}
-                                      disabled={saving}
+                                      disabled={savingKey === gameKey(game)}
                                       className="text-slate-500 hover:text-slate-800"
                                       title="Use the scraped value again"
                                     >

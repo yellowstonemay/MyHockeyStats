@@ -80,11 +80,13 @@ public class PlayerProfileController {
         }
         List<PlayerProfile> players = playerProfileService.listPlayersForUser(user.get().getId());
         Optional<PlayerProfile> primary = playerProfileService.getPrimaryPlayerForUser(user.get().getId());
+        java.util.Map<Long, String> relations =
+            playerProfileService.relationByPlayerForUser(user.get().getId());
 
         List<ProfileResponse> responses = new ArrayList<>();
         for (PlayerProfile player : players) {
             boolean isPrimary = primary.isPresent() && primary.get().getId().equals(player.getId());
-            responses.add(toResponse(player, null, isPrimary, user.get()));
+            responses.add(toResponse(player, relations.get(player.getId()), isPrimary, user.get()));
         }
         return ResponseEntity.ok(Map.of("players", responses));
     }

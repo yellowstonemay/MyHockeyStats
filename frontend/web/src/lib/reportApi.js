@@ -18,10 +18,16 @@ export const reportApi = {
 
   // Feature 2: generate the AI season report (weekly/daily cost-capped)
   generateInsights(season, playerId) {
+    const seasonNumber = Number(season)
+    const playerNumber = Number(playerId)
     return api.fetchWithAuth('/players/me/report/insights', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ season, playerId: playerId || null }),
+      body: JSON.stringify({
+        // Send real numbers: the selected player id lives as a string in state.
+        season: Number.isFinite(seasonNumber) && seasonNumber > 0 ? seasonNumber : null,
+        playerId: Number.isFinite(playerNumber) && playerNumber > 0 ? playerNumber : null,
+      }),
     })
   },
 }
