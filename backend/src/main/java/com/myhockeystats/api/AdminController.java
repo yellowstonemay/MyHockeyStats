@@ -96,6 +96,7 @@ public class AdminController {
                        SELECT COALESCE(json_agg(json_build_object(
                                   'id', pl.id,
                                   'name', pl.full_name,
+                                  'birthdate', pl.birthdate,
                                   'relation', lup.relation,
                                   'canEdit', lup.can_edit,
                                   'isOwner', (pl.owner_user_id = u.id)) ORDER BY pl.full_name), '[]'::json)

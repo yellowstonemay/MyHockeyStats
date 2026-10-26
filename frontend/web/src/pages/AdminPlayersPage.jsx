@@ -326,7 +326,7 @@ export default function AdminPlayersPage() {
                       <th className="px-3 py-2 text-left">Registered</th>
                       <th className="px-3 py-2 text-left">Email (login)</th>
                       <th className="px-3 py-2 text-left">Name</th>
-                      <th className="px-3 py-2 text-left">Players on this login</th>
+                      <th className="px-3 py-2 text-left">Players on this login <span className="text-xs font-normal text-slate-400">(name #id)</span></th>
                       <th className="px-3 py-2 text-left">Links</th>
                       <th className="px-3 py-2 text-left">Last visit</th>
                       <th className="px-3 py-2 text-left">Last deep-dive</th>
@@ -353,7 +353,7 @@ export default function AdminPlayersPage() {
                                     key={`${p.id}-${pl.id}`}
                                     label={`${pl.name} #${pl.id}`}
                                     role={accessRole(pl)}
-                                    sub={`relation: ${pl.relation || 'unknown'}`}
+                                    sub={`Player #${pl.id}${pl.birthdate ? ` · born ${String(pl.birthdate).slice(0, 10)}` : ''} · relation ${pl.relation || 'unknown'}`}
                                   />
                                 ))}
                               </div>
@@ -435,7 +435,7 @@ export default function AdminPlayersPage() {
                       <tr key={p.id} className="border-t border-slate-200 hover:bg-slate-50">
                         <td className="px-3 py-2 font-medium">
                           {p.profile_name}
-                          <span className="ml-1 text-xs text-slate-400">#{p.id}</span>
+                          <span className="ml-1 text-xs text-slate-400" title="Player profile id">#{p.id}</span>
                         </td>
                         <td className="px-3 py-2 whitespace-nowrap">
                           {p.birthdate ? String(p.birthdate).slice(0, 10) : '—'}
