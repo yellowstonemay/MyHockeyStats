@@ -234,6 +234,47 @@ public class PlayerProfileService {
         return saved;
     }
 
+    /** Outcome of adding a player: reused an existing profile, or created one. */
+    public record AttachResult(PlayerProfile player, boolean created, boolean alreadyAttached) {}
+
+    /**
+     * Add a player without duplicating it.
+     *
+     * <p>Several logins may manage the same kid (two parents, a parent and a
+     * guardian, …). Rather than inserting a second profile — which split the
+     * manual stats, AI reports and seasons across copies — an existing profile
+     * with the same name and birthdate is reused and the caller is simply
+     * attached to it. Only when nothing matches is a new profile created.
+     */
+    @Transactional
+    public AttachResult createOrAttach(User user, String fullName, LocalDate birthdate,
+                                       String location, String position, String relation) {
+        String name = fullName == null ? "" : fullName.trim();
+        if (!name.isEmpty() && birthdate != null) {
+            Optional<PlayerProfile> existing = playerProfileRepository
+                .findFirstByFullNameIgnoreCaseAndBirthdateOrderByIdAsc(name, birthdate);
+            if (existing.isPresent()) {
+                PlayerProfile player = existing.get();
+                boolean alreadyAttached = userPlayerRepository
+                    .existsByUserIdAndPlayerId(user.getId(), player.getId());
+                if (!alreadyAttached) {
+                    linkPlayer(user, player, relation == null ? UserPlayer.RELATION_PARENT : relation);
+                }
+                return new AttachResult(player, false, alreadyAttached);
+            }
+        }
+        return new AttachResult(createPlayer(user, name, birthdate, location, position, relation), true, false);
+    }
+
+    /**
+     * Every login attached to a player, so one owner can see who else manages
+     * the same kid instead of assuming the profile is theirs alone.
+     */
+    @Transactional(readOnly = true)
+    public List<UserPlayer> loginsForPlayer(Long playerId) {
+        return userPlayerRepository.findByPlayerId(playerId);
+    }
+
     /** Attach an existing player to a login (multiple logins, same player). */
     @Transactional
     public UserPlayer linkPlayer(User user, PlayerProfile player, String relation) {

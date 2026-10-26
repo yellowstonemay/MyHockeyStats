@@ -435,6 +435,33 @@ export default function Players() {
                               </>
                             )}
                           </p>
+                          {/* Several logins may manage the same kid — show who,
+                              so nobody assumes the profile is theirs alone. */}
+                          {Array.isArray(player.sharedWith) && player.sharedWith.length > 1 && (
+                            <p className="text-xs text-slate-500 mt-1 flex flex-wrap items-center gap-1">
+                              <span className="text-slate-400">Shared with:</span>
+                              {player.sharedWith
+                                .filter((login) => !login.isYou)
+                                .map((login) => (
+                                  <span
+                                    key={login.email}
+                                    className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border ${
+                                      login.isOwner
+                                        ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                        : login.canEdit
+                                          ? 'bg-sky-50 text-sky-800 border-sky-200'
+                                          : 'bg-slate-50 text-slate-600 border-slate-200'
+                                    }`}
+                                    title={`relation: ${login.relation || 'unknown'}`}
+                                  >
+                                    {login.email}
+                                    <span className="opacity-70">
+                                      · {login.isOwner ? 'owner' : login.canEdit ? 'can edit' : 'read-only'}
+                                    </span>
+                                  </span>
+                                ))}
+                            </p>
+                          )}
                         </div>
                         <div className="flex flex-wrap gap-2">
                           {!player.isPrimary && (

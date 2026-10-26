@@ -18,6 +18,7 @@ import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -64,9 +65,12 @@ public class PlayerProfileController {
                            Integer goals, Integer assists, Integer pim) {}
     record OwnerRequest(Long userId, String email) {}
     record EditorRequest(Long userId, String email, Boolean canEdit) {}
+    /** Another login attached to the same player, so owners can see each other. */
+    record SharedLogin(String email, String relation, Boolean isOwner, Boolean canEdit, Boolean isYou) {}
     record ProfileResponse(Long id, String fullName, String birthMonthYear, String location,
                            String position, String photoUrl, String relation, Boolean isPrimary,
-                           Long ownerUserId, String ownerEmail, Boolean canEdit) {}
+                           Long ownerUserId, String ownerEmail, Boolean canEdit,
+                           List<SharedLogin> sharedWith) {}
 
     // ── collection ─────────────────────────────────────────────────────────
 
@@ -86,7 +90,8 @@ public class PlayerProfileController {
         List<ProfileResponse> responses = new ArrayList<>();
         for (PlayerProfile player : players) {
             boolean isPrimary = primary.isPresent() && primary.get().getId().equals(player.getId());
-            responses.add(toResponse(player, relations.get(player.getId()), isPrimary, user.get()));
+            responses.add(toResponse(player, relations.get(player.getId()), isPrimary, user.get(),
+                sharedLogins(player, user.get())));
         }
         return ResponseEntity.ok(Map.of("players", responses));
     }
@@ -105,17 +110,31 @@ public class PlayerProfileController {
                 throw new IllegalArgumentException("Player name is required");
             }
             LocalDate birthdate = parseBirthMonthYear(req.birthMonthYear());
-            PlayerProfile created = playerProfileService.createPlayer(
+            PlayerProfileService.AttachResult result = playerProfileService.createOrAttach(
                 user.get(), req.fullName().trim(), birthdate, req.location(), req.position(),
                 req.relation());
+            PlayerProfile created = result.player();
 
-            // Newly added players need their career data pulled in.
-            DeepDiveService.QueueResult queue = deepDiveService.enqueueForPlayer(created.getId(), user.get().getId());
+            // Only a brand-new profile needs its career data pulled in; an
+            // existing one has already been through the deep-dive.
+            DeepDiveService.QueueResult queue = result.created()
+                ? deepDiveService.enqueueForPlayer(created.getId(), user.get().getId())
+                : new DeepDiveService.QueueResult(false, "Already on HockeyStats.");
+
+            String message = result.created()
+                ? queue.message()
+                : result.alreadyAttached()
+                    ? created.getFullName() + " is already on your account."
+                    : created.getFullName() + " already existed, so we attached your login to it "
+                        + "instead of creating a duplicate.";
 
             return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
-                "player", toResponse(created, req.relation(), true, user.get()),
+                "player", toResponse(created, req.relation(), result.created(), user.get(),
+                    sharedLogins(created, user.get())),
+                "created", result.created(),
+                "alreadyAttached", result.alreadyAttached(),
                 "deepDiveQueued", queue.queued(),
-                "message", queue.message()));
+                "message", message));
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
         }
@@ -495,11 +514,33 @@ public class PlayerProfileController {
     }
 
     private ProfileResponse toResponse(PlayerProfile p, String relation, boolean isPrimary, User viewer) {
+        return toResponse(p, relation, isPrimary, viewer, List.of());
+    }
+
+    private ProfileResponse toResponse(PlayerProfile p, String relation, boolean isPrimary, User viewer,
+                                       List<SharedLogin> sharedWith) {
         return new ProfileResponse(
             p.getId(), p.getFullName(), formatBirthMonthYear(p.getBirthdate()),
             p.getLocation(), p.getPosition(), p.getPhotoUrl(), relation, isPrimary,
             p.getOwnerUserId(), emailOf(p.getOwnerUserId()),
-            viewer != null && playerProfileService.canEditPlayer(viewer, p.getId()));
+            viewer != null && playerProfileService.canEditPlayer(viewer, p.getId()),
+            sharedWith == null ? List.of() : sharedWith);
+    }
+
+    /** Every login on the player, marking which one owns it. */
+    private List<SharedLogin> sharedLogins(PlayerProfile player, User viewer) {
+        List<SharedLogin> logins = new ArrayList<>();
+        for (var link : playerProfileService.loginsForPlayer(player.getId())) {
+            User login = link.getUser();
+            if (login == null || login.getEmail() == null) {
+                continue;
+            }
+            boolean isOwner = login.getId().equals(player.getOwnerUserId());
+            boolean isYou = viewer != null && login.getId().equals(viewer.getId());
+            logins.add(new SharedLogin(login.getEmail(), link.getRelation(), isOwner, link.isCanEdit(), isYou));
+        }
+        logins.sort(Comparator.comparing(SharedLogin::email, String.CASE_INSENSITIVE_ORDER));
+        return logins;
     }
 
     private String emailOf(Long userId) {
