@@ -2,11 +2,14 @@ package com.myhockeystats.api;
 
 import com.myhockeystats.model.PlayerProfile;
 import com.myhockeystats.model.User;
+import com.myhockeystats.model.UserPlayer;
 import com.myhockeystats.repository.UserRepository;
 import com.myhockeystats.security.JwtUtil;
 import com.myhockeystats.service.PlayerProfileService;
 import com.myhockeystats.service.PlayerSourceLinkService;
 import com.myhockeystats.service.integration.MhrGameLookupService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
@@ -22,10 +25,16 @@ import java.util.*;
  * Follows are private per user and are refreshed daily by the deep-dive
  * pipeline (scripts/deep_dive/follows_deep.py). A per-user cap bounds the
  * daily scrape load so we don't hammer the source sites.
+ *
+ * Following also gives the login a READ-ONLY view of the player (a FAN link on
+ * the profile that already carries that source identity), because a followed
+ * player has to be selectable to be looked at — a name in a list is not a view.
  */
 @RestController
 @RequestMapping("/api/follows")
 public class FollowController {
+
+    private static final Logger log = LoggerFactory.getLogger(FollowController.class);
 
     /** Max players one user may follow (protects source-site scrape load). */
     private static final int MAX_FOLLOWS = 20;
@@ -261,10 +270,184 @@ public class FollowController {
             "VALUES (gen_random_uuid(), ?, ?, ?, ?, NOW()) " +
             "ON CONFLICT (user_id, source, source_player_id) DO NOTHING",
             uid, source, spid, name);
+        // Idempotent: also runs when the follow already existed, so a login that
+        // followed before this behaviour existed still gets the read-only view.
+        attachFollowedPlayer(user.get(), source, spid);
         if (inserted == 0) {
             return ResponseEntity.ok(Map.of("message", "You're already following " + name, "created", false));
         }
         return ResponseEntity.ok(Map.of("message", "Following " + name, "created", true));
+    }
+
+    /**
+     * Give this login a read-only (FAN) view of a followed player.
+     *
+     * <p>The profile that already carries the followed source identity is reused
+     * and attached. When nothing links that identity yet, a tracked profile is
+     * created for it (ownerless, no birthdate — the sources publish none) so the
+     * followed player is selectable and their tabs work, instead of the follow
+     * only being a name in a list.
+     */
+    private void attachFollowedPlayer(User user, String source, String sourcePlayerId) {
+        if (user == null || source == null || sourcePlayerId == null || sourcePlayerId.isBlank()) {
+            return;
+        }
+        String src = source.trim().toUpperCase(Locale.ROOT);
+        if (!SOURCES.contains(src)) {
+            return; // EP careers are not source ids a profile can be linked to
+        }
+        try {
+            List<Long> profileIds = jdbcTemplate.queryForList(
+                "SELECT player_id FROM player_source_links " +
+                "WHERE source = ? AND source_player_id = ? ORDER BY player_id LIMIT 1",
+                Long.class, src, sourcePlayerId);
+            if (profileIds.isEmpty()) {
+                PlayerProfile tracked = playerProfileService.createTrackedPlayer(
+                    user, rosterPlayerName(src, sourcePlayerId), rosterBirthdate(src, sourcePlayerId));
+                jdbcTemplate.update(
+                    "INSERT INTO player_source_links (id, player_id, source, source_player_id, " +
+                    "link_state, match_method, confidence_score, confirmed_at, last_verified_at, " +
+                    "created_at, updated_at) " +
+                    "VALUES (gen_random_uuid(), ?, ?, ?, 'CONFIRMED', 'FOLLOW', 1.0, NOW(), NOW(), NOW(), NOW()) " +
+                    "ON CONFLICT (player_id, source) DO UPDATE " +
+                    "SET source_player_id = EXCLUDED.source_player_id, updated_at = NOW()",
+                    tracked.getId(), src, sourcePlayerId);
+                return;
+            }
+            long profileId = profileIds.get(0);
+            if (playerProfileService.isLinked(user.getId(), profileId)) {
+                return; // already on the account — never downgrade an owner/parent link
+            }
+            playerProfileService.getProfileById(profileId).ifPresent(profile ->
+                playerProfileService.linkPlayer(user, profile, UserPlayer.RELATION_FAN));
+        } catch (Exception ex) {
+            // A follow must not fail because the read-only view could not be attached.
+            log.warn("Could not attach followed player {}:{} to user {}: {}",
+                source, sourcePlayerId, user.getId(), ex.getMessage());
+        }
+    }
+
+    /** Display name of a roster player, or the source id when the roster moved on. */
+    private String rosterPlayerName(String source, String sourcePlayerId) {
+        String[] meta = ROSTER.get(source);
+        if (meta == null) {
+            return sourcePlayerId;
+        }
+        try {
+            List<String> names = jdbcTemplate.queryForList(
+                "SELECT " + meta[1] + " FROM " + meta[0] + " WHERE player_id::text = ? " +
+                "ORDER BY " + meta[2] + " DESC LIMIT 1", String.class, sourcePlayerId);
+            if (!names.isEmpty() && names.get(0) != null && !names.get(0).isBlank()) {
+                return displayName(names.get(0).trim());
+            }
+        } catch (Exception e) {
+            log.debug("Could not read roster name for {}:{}: {}", source, sourcePlayerId, e.getMessage());
+        }
+        return sourcePlayerId;
+    }
+
+    /** AYHL publishes "Last,First" — a profile should read "First Last". */
+    private static String displayName(String raw) {
+        int comma = raw.indexOf(',');
+        if (comma <= 0 || comma == raw.length() - 1) {
+            return raw;
+        }
+        String last = raw.substring(0, comma).trim();
+        String first = raw.substring(comma + 1).trim();
+        return (first + " " + last).trim();
+    }
+
+    /**
+     * Birthdate from the roster when the source publishes one (only AYHL does;
+     * THF/AHF rosters carry no usable value), otherwise null.
+     */
+    private java.time.LocalDate rosterBirthdate(String source, String sourcePlayerId) {
+        if (!"AYHL".equals(source)) {
+            return null;
+        }
+        try {
+            List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                "SELECT birth_month, birth_year FROM ayhl_roster WHERE player_id::text = ? " +
+                "AND birth_year IS NOT NULL LIMIT 1", sourcePlayerId);
+            if (rows.isEmpty()) {
+                return null;
+            }
+            Object year = rows.get(0).get("birth_year");
+            Object month = rows.get(0).get("birth_month");
+            int y = ((Number) year).intValue();
+            int m = month instanceof Number ? ((Number) month).intValue() : 1;
+            if (m < 1 || m > 12) {
+                m = 1;
+            }
+            return java.time.LocalDate.of(y, m, 1);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * Drop the read-only view a follow created. Only a FAN link is removed, and
+     * never the owner's own link, so unfollowing can never take a player away
+     * from the account that owns it.
+     */
+    private void detachFollowedPlayer(long userId, String source, String sourcePlayerId) {
+        if (source == null || sourcePlayerId == null) {
+            return;
+        }
+        try {
+            List<Long> profileIds = jdbcTemplate.queryForList(
+                "SELECT player_id FROM player_source_links " +
+                "WHERE source = ? AND source_player_id = ? ORDER BY player_id LIMIT 1",
+                Long.class, source.trim().toUpperCase(Locale.ROOT), sourcePlayerId);
+            if (profileIds.isEmpty()) {
+                return;
+            }
+            long profileId = profileIds.get(0);
+            Integer removable = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM user_players up " +
+                "JOIN player_profiles pp ON pp.id = up.player_id " +
+                "WHERE up.user_id = ? AND up.player_id = ? AND up.relation = 'FAN' " +
+                "AND (pp.owner_user_id IS NULL OR pp.owner_user_id <> up.user_id)",
+                Integer.class, userId, profileId);
+            if (removable != null && removable > 0) {
+                playerProfileService.unlinkPlayer(userId, profileId);
+            }
+            deleteIfOrphaned(profileId);
+        } catch (Exception ex) {
+            log.warn("Could not detach unfollowed player {}:{} from user {}: {}",
+                source, sourcePlayerId, userId, ex.getMessage());
+        }
+    }
+
+    /**
+     * Delete a tracked profile nothing points at any more: no owner, no login
+     * attached, and no follow row for any of its identities. Only profiles a
+     * follow created are eligible, so unfollowing can never remove a player
+     * somebody added themselves.
+     */
+    private void deleteIfOrphaned(long profileId) {
+        Integer createdByFollow = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM player_source_links WHERE player_id = ? AND match_method = 'FOLLOW'",
+            Integer.class, profileId);
+        if (createdByFollow == null || createdByFollow == 0) {
+            return;
+        }
+        Integer attached = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM user_players WHERE player_id = ?", Integer.class, profileId);
+        Integer owned = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM player_profiles WHERE id = ? AND owner_user_id IS NOT NULL",
+            Integer.class, profileId);
+        Integer stillFollowed = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM follows f JOIN player_source_links l " +
+            "ON l.source = f.source AND l.source_player_id = f.source_player_id " +
+            "WHERE l.player_id = ?", Integer.class, profileId);
+        boolean unused = (attached == null || attached == 0)
+            && (owned == null || owned == 0)
+            && (stillFollowed == null || stillFollowed == 0);
+        if (unused) {
+            jdbcTemplate.update("DELETE FROM player_profiles WHERE id = ?", profileId);
+            log.info("Removed tracked player profile {} (no followers left)", profileId);
+        }
     }
 
     /** DELETE /api/follows/{id} — unfollow. */
@@ -275,10 +458,17 @@ public class FollowController {
         if (user.isEmpty()) {
             return ResponseEntity.status(401).body(Map.of("error", "Authentication required"));
         }
+        List<Map<String, Object>> followed = jdbcTemplate.queryForList(
+            "SELECT source, source_player_id FROM follows WHERE id = ?::uuid AND user_id = ?",
+            id, user.get().getId());
         int deleted = jdbcTemplate.update(
             "DELETE FROM follows WHERE id = ?::uuid AND user_id = ?", id, user.get().getId());
         if (deleted == 0) {
             return ResponseEntity.status(404).body(Map.of("error", "Follow not found"));
+        }
+        for (Map<String, Object> row : followed) {
+            detachFollowedPlayer(user.get().getId(),
+                (String) row.get("source"), (String) row.get("source_player_id"));
         }
         return ResponseEntity.ok(Map.of("message", "Unfollowed"));
     }

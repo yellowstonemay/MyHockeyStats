@@ -20,4 +20,12 @@ public interface PlayerProfileRepository extends JpaRepository<PlayerProfile, Lo
      * keeps two different children with the same name apart.
      */
     Optional<PlayerProfile> findFirstByFullNameIgnoreCaseAndBirthdateOrderByIdAsc(String fullName, LocalDate birthdate);
+
+    /**
+     * A tracked profile: created by following a player, so nobody owns it and
+     * the birthdate is usually unknown. Used to adopt the profile when somebody
+     * later claims the player as their own instead of creating a duplicate.
+     */
+    Optional<PlayerProfile> findFirstByFullNameIgnoreCaseAndBirthdateIsNullAndOwnerUserIdIsNullOrderByIdAsc(
+        String fullName);
 }

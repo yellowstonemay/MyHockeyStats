@@ -31,7 +31,10 @@ public class PlayerProfile {
     @Column(nullable = false)
     private String fullName;
 
-    @Column(nullable = false)
+    /**
+     * Optional: a tracked profile (a player the login only follows) has no
+     * birthdate because THF/AHF rosters do not publish one.
+     */
     private LocalDate birthdate;
 
     private String location;

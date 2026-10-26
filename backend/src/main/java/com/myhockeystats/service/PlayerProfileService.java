@@ -164,8 +164,18 @@ public class PlayerProfileService {
             return Optional.of(primary.get().getPlayer());
         }
         List<UserPlayer> links = userPlayerRepository.findByUserId(userId);
-        if (!links.isEmpty() && links.get(0).getPlayer() != null) {
-            return Optional.of(links.get(0).getPlayer());
+        // No explicit default: prefer a player the login manages, so a player it
+        // only FOLLOWS never becomes the one the dashboard opens with.
+        for (UserPlayer link : links) {
+            if (link.getPlayer() != null
+                && !UserPlayer.RELATION_FAN.equalsIgnoreCase(link.getRelation())) {
+                return Optional.of(link.getPlayer());
+            }
+        }
+        for (UserPlayer link : links) {
+            if (link.getPlayer() != null) {
+                return Optional.of(link.getPlayer());
+            }
         }
         // Legacy fallback: a profile created before the link table was backfilled.
         return playerProfileRepository.findFirstByCreatedById(userId);
@@ -238,6 +248,29 @@ public class PlayerProfileService {
     public record AttachResult(PlayerProfile player, boolean created, boolean alreadyAttached) {}
 
     /**
+     * Create the profile of a player this login only FOLLOWS.
+     *
+     * <p>A follow has to be a real profile to be selectable — the dashboard and
+     * every stats tab are scoped by player id. Followed players have no owner
+     * (nobody manages them) and usually no birthdate (THF/AHF publish none), so
+     * the profile is "tracked": ownerless, read-only, and adopted later if
+     * somebody claims the player as their own.
+     */
+    @Transactional
+    public PlayerProfile createTrackedPlayer(User follower, String fullName, LocalDate birthdate) {
+        PlayerProfile profile = new PlayerProfile();
+        profile.setCreatedBy(follower);
+        profile.setOwnerUserId(null);
+        profile.setFullName(fullName == null ? "" : fullName.trim());
+        profile.setBirthdate(birthdate);
+        profile.setCreatedAt(Instant.now());
+        profile.setUpdatedAt(Instant.now());
+        PlayerProfile saved = playerProfileRepository.save(profile);
+        linkPlayer(follower, saved, UserPlayer.RELATION_FAN);
+        return saved;
+    }
+
+    /**
      * Add a player without duplicating it.
      *
      * <p>Several logins may manage the same kid (two parents, a parent and a
@@ -261,6 +294,26 @@ public class PlayerProfileService {
                     linkPlayer(user, player, relation == null ? UserPlayer.RELATION_PARENT : relation);
                 }
                 return new AttachResult(player, false, alreadyAttached);
+            }
+            // Nobody owns a profile with this name and no birthdate: that is the
+            // "tracked" profile a follow created. Claim it (and fill in the
+            // birthdate) instead of creating a second profile for the same kid.
+            Optional<PlayerProfile> tracked = playerProfileRepository
+                .findFirstByFullNameIgnoreCaseAndBirthdateIsNullAndOwnerUserIdIsNullOrderByIdAsc(name);
+            if (tracked.isPresent()) {
+                PlayerProfile player = tracked.get();
+                player.setBirthdate(birthdate);
+                if (location != null && !location.isBlank()) {
+                    player.setLocation(location);
+                }
+                if (position != null && !position.isBlank()) {
+                    player.setPosition(position);
+                }
+                player.setOwnerUserId(user.getId());
+                player.setUpdatedAt(Instant.now());
+                playerProfileRepository.save(player);
+                linkPlayer(user, player, relation == null ? UserPlayer.RELATION_PARENT : relation);
+                return new AttachResult(player, false, false);
             }
         }
         return new AttachResult(createPlayer(user, name, birthdate, location, position, relation), true, false);
@@ -292,8 +345,10 @@ public class PlayerProfileService {
         link.setPlayer(player);
         link.setRelation(relation == null ? UserPlayer.RELATION_PARENT : relation);
         link.setCreatedAt(Instant.now());
-        // First player for this login becomes the primary one.
-        link.setPrimary(userPlayerRepository.findByUserId(user.getId()).isEmpty());
+        // First player for this login becomes the primary one — but a player you
+        // only follow must never become the default the dashboard opens with.
+        link.setPrimary(!UserPlayer.RELATION_FAN.equalsIgnoreCase(link.getRelation())
+            && userPlayerRepository.findByUserId(user.getId()).isEmpty());
         return userPlayerRepository.save(link);
     }
 

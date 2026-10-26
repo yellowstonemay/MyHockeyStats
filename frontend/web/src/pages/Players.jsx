@@ -25,6 +25,15 @@ function isFollowingPlayer(player) {
   return String(player?.relation || '').toUpperCase() === 'FAN'
 }
 
+/**
+ * A player this login FOLLOWS: read-only FAN link. A legacy link where the
+ * login owns the player but the relation still says FAN is not a follow — the
+ * owner keeps the player under "Me or my kids".
+ */
+function isFollowedPlayer(player) {
+  return isFollowingPlayer(player) && !player?.canEdit
+}
+
 /** Small pill used to mark a whole section as editable or view-only. */
 function CardBadge({ icon: Icon, tone = 'slate', children }) {
   const tones = {
@@ -209,6 +218,12 @@ export default function Players() {
 
   const followedKeys = new Set(follows.map((f) => `${f.source}:${f.sourcePlayerId}`))
 
+  // Two categories, not one mixed list: players you manage (editable) and the
+  // players you follow (read-only views of someone else's player). Followed
+  // players also become selectable on the dashboard; here they stay in the
+  // Following list, which is the only place they can be removed from.
+  const myPlayers = players.filter((player) => !isFollowedPlayer(player))
+
   const startEdit = (player) => {
     setEditingId(player.id)
     setEditForm({
@@ -313,10 +328,13 @@ export default function Players() {
           </div>
         )}
 
-        {/* ── Existing players ─────────────────────────────────────────── */}
+        {/* ── Existing players ──────────────────────────────────────── */}
         <Card className="mb-6">
           <CardHeader>
-            <CardTitle>Your players</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              <Pencil className="w-5 h-5" /> Me or my kids
+              <CardBadge icon={Pencil} tone="green">editable</CardBadge>
+            </CardTitle>
             <CardDescription>
               The default player is shown on your dashboard. Each player has one owner account;
               other accounts attached to it are read-only until the owner grants them edit access.
@@ -325,13 +343,13 @@ export default function Players() {
           <CardContent>
             {loading ? (
               <p className="text-slate-500 text-sm">Loading…</p>
-            ) : players.length === 0 ? (
+            ) : myPlayers.length === 0 ? (
               <p className="text-slate-500 text-sm">
-                No players yet. Add one below and we'll pull in their stats.
+                No players yet. Add one below and we&apos;ll pull in their stats.
               </p>
             ) : (
               <ul className="divide-y divide-slate-200">
-                {players.map((player) => (
+                {myPlayers.map((player) => (
                   <li key={player.id} className="py-4">
                     {editingId === player.id ? (
                       <div className="space-y-3">
@@ -406,7 +424,7 @@ export default function Players() {
                             {player.location ? ` · ${player.location}` : ''}
                           </p>
                           <p className="text-xs text-slate-500 mt-1">
-                            {isFollowingPlayer(player) ? (
+                            {isFollowedPlayer(player) ? (
                               <>
                                 <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800 border border-indigo-200">
                                   Following

@@ -40,10 +40,11 @@ function shortSeason(seasonValue) {
 
 /**
  * A FAN link means this login only follows the player, so every tab is
- * view-only: no manual stat edits, no profile changes.
+ * view-only: no manual stat edits, no profile changes. A legacy link that says
+ * FAN while the login owns the player is not a follow — the owner keeps it.
  */
 function isFollowOnly(player) {
-  return String(player?.relation || '').toUpperCase() === 'FAN'
+  return String(player?.relation || '').toUpperCase() === 'FAN' && !player?.canEdit
 }
 
 // A season belongs to the calendar year it starts in, and the cutover is APRIL —
