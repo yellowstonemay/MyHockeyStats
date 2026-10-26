@@ -39,12 +39,12 @@ function shortSeason(seasonValue) {
 }
 
 /**
- * A FAN link means this login only follows the player, so every tab is
- * view-only: no manual stat edits, no profile changes. A legacy link that says
- * FAN while the login owns the player is not a follow — the owner keeps it.
+ * A FAN link means this login only follows the player: the selector marks it
+ * "Following". Whether it is also read-only is a separate question (an admin
+ * can edit a player somebody else owns), so that is checked on its own.
  */
 function isFollowOnly(player) {
-  return String(player?.relation || '').toUpperCase() === 'FAN' && !player?.canEdit
+  return String(player?.relation || '').toUpperCase() === 'FAN'
 }
 
 // A season belongs to the calendar year it starts in, and the cutover is APRIL —
@@ -269,6 +269,8 @@ export default function Dashboard() {
 
   const selectedPlayer = players.find((player) => String(player.id) === selectedPlayerId) || null
   const selectedIsFollowOnly = isFollowOnly(selectedPlayer)
+  // A followed player is view-only for this login, even when the login happens
+  // to be an admin (admins may edit anything server-side).
   const selectedReadOnly = !selectedPlayer?.canEdit || selectedIsFollowOnly
 
   const recordKey = (r) => `${r.source || 'src'}|${r.sourcePlayerId || ''}|${r.season || ''}`

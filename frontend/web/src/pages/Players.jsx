@@ -25,15 +25,6 @@ function isFollowingPlayer(player) {
   return String(player?.relation || '').toUpperCase() === 'FAN'
 }
 
-/**
- * A player this login FOLLOWS: read-only FAN link. A legacy link where the
- * login owns the player but the relation still says FAN is not a follow — the
- * owner keeps the player under "Me or my kids".
- */
-function isFollowedPlayer(player) {
-  return isFollowingPlayer(player) && !player?.canEdit
-}
-
 /** Small pill used to mark a whole section as editable or view-only. */
 function CardBadge({ icon: Icon, tone = 'slate', children }) {
   const tones = {
@@ -222,7 +213,14 @@ export default function Players() {
   // players you follow (read-only views of someone else's player). Followed
   // players also become selectable on the dashboard; here they stay in the
   // Following list, which is the only place they can be removed from.
-  const myPlayers = players.filter((player) => !isFollowedPlayer(player))
+  const myPlayers = players.filter((player) => !isFollowingPlayer(player))
+
+  /**
+   * Editing is allowed only for players this login manages. A followed player
+   * is a read-only view no matter what permissions the login has: the server
+   * lets admins edit anything, but "following" means look, don't touch.
+   */
+  const canManage = (player) => Boolean(player?.canEdit) && !isFollowingPlayer(player)
 
   const startEdit = (player) => {
     setEditingId(player.id)
@@ -423,34 +421,35 @@ export default function Players() {
                             {player.position ? ` · ${player.position}` : ''}
                             {player.location ? ` · ${player.location}` : ''}
                           </p>
-                          <p className="text-xs text-slate-500 mt-1">
-                            {isFollowedPlayer(player) ? (
-                              <>
-                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800 border border-indigo-200">
-                                  Following
-                                </span>
-                                {!player.canEdit && (
-                                  <span className="ml-2 px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
-                                    read-only
-                                  </span>
-                                )}
-                              </>
+                          {/* Owner = whose account the profile belongs to.
+                              "you can edit" = whether THIS login may change it
+                              (owner, granted editor, or admin). They are
+                              different questions: an admin can edit a player
+                              somebody else owns. */}
+                          <p className="text-xs text-slate-500 mt-1 flex flex-wrap items-center gap-2">
+                            {isFollowingPlayer(player) && (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800 border border-indigo-200">
+                                Following
+                              </span>
+                            )}
+                            <span>
+                              Owner:{' '}
+                              <span className="font-medium text-slate-700">
+                                {player.ownerEmail || 'nobody (tracked player)'}
+                              </span>
+                            </span>
+                            {isFollowingPlayer(player) ? (
+                              <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
+                                read-only
+                              </span>
+                            ) : player.canEdit ? (
+                              <span className="px-1.5 py-0.5 rounded bg-green-100 text-green-800 border border-green-200">
+                                you can edit
+                              </span>
                             ) : (
-                              <>
-                                Owner:{' '}
-                                <span className="font-medium text-slate-700">
-                                  {player.ownerEmail || 'not set'}
-                                </span>
-                                {player.canEdit ? (
-                                  <span className="ml-2 px-1.5 py-0.5 rounded bg-green-100 text-green-800 border border-green-200">
-                                    you can edit
-                                  </span>
-                                ) : (
-                                  <span className="ml-2 px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
-                                    read-only
-                                  </span>
-                                )}
-                              </>
+                              <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
+                                read-only
+                              </span>
                             )}
                           </p>
                           {/* Several logins may manage the same kid — show who,
@@ -495,8 +494,8 @@ export default function Players() {
                           <Button
                             variant="secondary"
                             size="sm"
-                            disabled={!player.canEdit}
-                            title={player.canEdit ? undefined : 'Only the owner can change this profile'}
+                            disabled={!canManage(player)}
+                            title={canManage(player) ? undefined : 'Only the owner can change this profile'}
                             onClick={() => startEdit(player)}
                           >
                             Edit
