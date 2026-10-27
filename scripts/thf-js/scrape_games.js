@@ -44,6 +44,9 @@ function toInt(value, fallback = 0) {
     return Number.isFinite(n) ? n : fallback;
 }
 
+/** How long after a game a scoresheet is still worth re-requesting. */
+const SHEET_RETRY_DAYS = 60;
+
 async function ensureGamesTable(settings) {
     const client = await pool.connect();
     try {
@@ -203,7 +206,8 @@ async function upsertGameRecordsToDb(settings, seasonYear, gameRecords) {
                     game_status = EXCLUDED.game_status,
                     result_string = EXCLUDED.result_string,
                     scoresheet_link = EXCLUDED.scoresheet_link,
-                    scoresheet_json = EXCLUDED.scoresheet_json,
+                    -- Never let a later revision without a sheet erase one we have.
+                    scoresheet_json = COALESCE(EXCLUDED.scoresheet_json, ${settings.gamesTable}.scoresheet_json),
                     scraped_at = EXCLUDED.scraped_at,
                     updated_at = NOW()
                 RETURNING (xmax = 0) AS inserted`,
@@ -540,18 +544,38 @@ async function throttledFetch(link) {
     return attempt;
 }
 
+function todayIso() {
+    return new Date().toISOString().slice(0, 10);
+}
+
+function daysAgoIso(days) {
+    return new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+}
+
+function isPdfBuffer(buffer) {
+    return Boolean(buffer) && buffer.length >= 5
+        && buffer.slice(0, 4).toString('latin1') === '%PDF';
+}
+
 async function downloadScoresheetPdf(link, outputPath) {
     if (!link) {
         return false;
     }
 
-    if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) {
-        return true;
+    if (fs.existsSync(outputPath)) {
+        const head = fs.readFileSync(outputPath).slice(0, 4).toString('latin1');
+        if (head === '%PDF' && fs.statSync(outputPath).size > 0) {
+            return true;
+        }
+        // Earlier runs stored the "No Results Posted for this game" reply as a
+        // .pdf; drop it so the real sheet can be fetched once it is published.
+        fs.unlinkSync(outputPath);
     }
 
     const buffer = await throttledFetch(link);
-    if (!buffer || buffer.length === 0) {
-        throw new Error(`Empty PDF download: ${link}`);
+    if (!isPdfBuffer(buffer)) {
+        const snippet = String(buffer || '').slice(0, 60).replace(/\s+/g, ' ').trim();
+        throw new Error(`no results posted yet${snippet ? ` (${snippet})` : ''}`);
     }
 
     fs.mkdirSync(path.dirname(outputPath), { recursive: true });
@@ -730,9 +754,14 @@ async function scrapeGames(league, seasonYear, options = {}) {
                 const response = await schedulePromise;
                 const data = await response.json();
                 const games = Array.isArray(data.games) ? data.games : [];
-                const existingSet = dbSync
-                    ? await getExistingGameIdSet(settings, seasonYear, games.map((g) => g.game_id))
-                    : new Set();
+                // A game is only "done" once its scoresheet has been PARSED. The
+                // source publishes the card days after the game, so rows inserted
+                // from the schedule used to be skipped forever and never picked
+                // their sheet up — which is why the current season had almost no
+                // per-game rows.
+                const jsonState = dbSync
+                    ? await getExistingGameJsonState(settings, seasonYear, games.map((g) => g.game_id))
+                    : new Map();
 
                 const teamRecords = [];
                 for (const g of games) {
@@ -741,22 +770,28 @@ async function scrapeGames(league, seasonYear, options = {}) {
                         continue;
                     }
 
-                    if (dbSync && existingSet.has(gameId)) {
-                        continue;
-                    }
-
                     const scoresheetLink = String(g.scoresheet_link || '').trim();
+                    const gameDate = String(g.date || '').trim();
+                    const alreadyParsed = dbSync && jsonState.get(gameId) === true;
+                    const isExisting = dbSync && jsonState.has(gameId);
+                    // A card cannot exist before the puck drops. A card that has
+                    // not appeared within SHEET_RETRY_DAYS of an already-stored
+                    // game is not coming (the source never posted it), so stop
+                    // asking — that keeps the weekly full run bounded.
+                    const resultsPossible = !gameDate
+                        || (gameDate <= todayIso()
+                            && (!isExisting || gameDate >= daysAgoIso(SHEET_RETRY_DAYS)));
                     let scoresheetPdfPath = '';
                     let scoresheetJson = null;
 
-                    if (gameId && scoresheetLink) {
+                    if (gameId && scoresheetLink && !alreadyParsed && resultsPossible) {
                         const pdfOutput = path.join(scoresheetDir, `${gameId}.pdf`);
                         try {
                             await downloadScoresheetPdf(scoresheetLink, pdfOutput);
                             scoresheetPdfPath = path.relative(__dirname, pdfOutput).replace(/\\/g, '/');
                             scoresheetJson = parseScoresheetPdfToJson(pdfOutput);
                         } catch (downloadErr) {
-                            console.warn(`Scoresheet download/parse failed for game ${gameId}: ${downloadErr.message}`);
+                            console.log(`  ${gameId}: no scoresheet yet (${downloadErr.message})`);
                         }
                     }
 
@@ -764,7 +799,7 @@ async function scrapeGames(league, seasonYear, options = {}) {
                         team_id: team.team_id,
                         team_name: team.team_name,
                         game_id: gameId,
-                        game_date: String(g.date || '').trim(),
+                        game_date: gameDate,
                         game_time: String(g.time || g.formatted_time || '').trim(),
                         location: String(g.location || '').trim(),
                         home_id: String(g.home_id || '').trim(),
@@ -791,7 +826,7 @@ async function scrapeGames(league, seasonYear, options = {}) {
                 if (dbSync) {
                     await upsertGameRecordsToDb(settings, seasonYear, teamRecords);
                 }
-                console.log(`Captured ${teamRecords.length} new game(s) for ${team.team_name}`);
+                console.log(`Synced ${teamRecords.length} game row(s) for ${team.team_name}`);
                 return true;
             } catch (err) {
                 console.error(`Failed to process ${team.team_name}: ${err.message}`);
