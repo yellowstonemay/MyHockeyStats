@@ -42,6 +42,17 @@ public class GameHistoryLookupService {
     private static final Set<String> SCORE_SOURCES = Set.of("MHR", "AYHL");
 
     /**
+     * source -> raw schedule table, for the sources whose per-player table has no
+     * score columns but whose schedule does (THF/AHF publish home_goals /
+     * away_goals per game). Joined on (season_year, game_id), which is unique
+     * there, and oriented by comparing the player's team with the home team.
+     */
+    private static final Map<String, String> RAW_SCORE_TABLES = Map.of(
+        "THF", "thf_games",
+        "AHF", "ahf_games"
+    );
+
+    /**
      * source -> season-aggregate table.
      *
      * A season can exist here long before the source publishes its game sheets:
@@ -210,13 +221,30 @@ public class GameHistoryLookupService {
             "LOWER(REGEXP_REPLACE(COALESCE(t.player_name, ''), '[[:space:],.''-]', '', 'g'))";
         String placeholders = matchValues.stream().map(x -> "?").collect(Collectors.joining(","));
         boolean hasScores = SCORE_SOURCES.contains(source);
+        String rawScoreTable = RAW_SCORE_TABLES.get(source);
+        boolean hasRawScores = rawScoreTable != null && tableExists(rawScoreTable);
         boolean hasOverrides = overridePlayerId != null && overrideTableAvailable();
 
-        String scoreColumns = hasScores
-            ? ", t.score_for, t.score_against"
-            : ", NULL AS score_for, NULL AS score_against";
-        // Only MHR publishes a start time; the other sources have no such column.
-        String timeColumn = "MHR".equals(source) ? ", t.game_time" : ", NULL AS game_time";
+        String scoreColumns;
+        if (hasScores) {
+            scoreColumns = ", t.score_for, t.score_against";
+        } else if (hasRawScores) {
+            scoreColumns = ", CASE WHEN rg.game_id IS NULL THEN NULL"
+                + " WHEN LOWER(COALESCE(t.team_for, '')) = LOWER(COALESCE(rg.home_team, ''))"
+                + " THEN rg.home_goals ELSE rg.away_goals END AS score_for"
+                + ", CASE WHEN rg.game_id IS NULL THEN NULL"
+                + " WHEN LOWER(COALESCE(t.team_for, '')) = LOWER(COALESCE(rg.home_team, ''))"
+                + " THEN rg.away_goals ELSE rg.home_goals END AS score_against";
+        } else {
+            scoreColumns = ", NULL AS score_for, NULL AS score_against";
+        }
+        String rawScoreJoin = hasRawScores
+            ? " LEFT JOIN " + rawScoreTable + " rg"
+                + " ON rg.season_year = t.season_year AND rg.game_id = t.game_id"
+            : "";
+        // MHR publishes a start time; THF/AHF keep it on their schedule row.
+        String timeColumn = "MHR".equals(source) ? ", t.game_time"
+            : hasRawScores ? ", rg.game_time" : ", NULL AS game_time";
         String overrideJoin = hasOverrides
             ? " LEFT JOIN game_stat_overrides o ON o.player_profile_id = ? AND o.source = ?"
                 + " AND o.season_year = t.season_year AND o.game_id = t.game_id"
@@ -232,7 +260,7 @@ public class GameHistoryLookupService {
             + " " + goalsColumn + " AS goals, " + assistsColumn + " AS assists, t.points AS scraped_points,"
             + " " + pimColumn + " AS pim"
             + scoreColumns + timeColumn + editedColumn + " "
-            + "FROM " + tableName + " t" + overrideJoin + " "
+            + "FROM " + tableName + " t" + overrideJoin + rawScoreJoin + " "
             + "WHERE " + matchColumn + " IN (" + placeholders + ")";
 
         List<Object> params = new ArrayList<>();

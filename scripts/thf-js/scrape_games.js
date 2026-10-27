@@ -790,6 +790,18 @@ async function scrapeGames(league, seasonYear, options = {}) {
                             await downloadScoresheetPdf(scoresheetLink, pdfOutput);
                             scoresheetPdfPath = path.relative(__dirname, pdfOutput).replace(/\\/g, '/');
                             scoresheetJson = parseScoresheetPdfToJson(pdfOutput);
+                            // The PDF layout is parsed by position, so verify the
+                            // per-player goals add up to the published final score
+                            // and shout when they don't (a sheet we should look at).
+                            const summed = (side) => Object.values(scoresheetJson?.[side] || {})
+                                .reduce((sum, e) => sum + Math.round(Number((e || {}).goals) || 0), 0);
+                            const hg = Number(g.home_goals);
+                            const ag = Number(g.away_goals);
+                            if (Number.isFinite(hg) && Number.isFinite(ag)
+                                && (summed('home_roster') !== hg || summed('visitor_roster') !== ag)) {
+                                console.warn(`  ${gameId}: sheet goals ${summed('home_roster')}-${summed('visitor_roster')}`
+                                    + ` but final score is ${hg}-${ag}`);
+                            }
                         } catch (downloadErr) {
                             console.log(`  ${gameId}: no scoresheet yet (${downloadErr.message})`);
                         }
