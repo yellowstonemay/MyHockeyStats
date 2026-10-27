@@ -7,6 +7,7 @@ import com.myhockeystats.model.integration.ThfPlayerCareer;
 import com.myhockeystats.repository.integration.AhfPlayerCareerRepository;
 import com.myhockeystats.repository.integration.AyhlPlayerCareerRepository;
 import com.myhockeystats.repository.integration.ThfPlayerCareerRepository;
+import com.myhockeystats.service.PlayerSourceLinkService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -165,6 +166,106 @@ public class CareerLookupService {
         );
     }
     
+    /**
+     * Career records for the identities a player is actually LINKED to.
+     *
+     * <p>Name matching leaks other kids with the same name into a player's page:
+     * two "Max Liu"s in different age groups are enough to show a 16AA season on
+     * a 10U player. Once a profile has CONFIRMED source links, the seasons must
+     * come from those ids only.
+     */
+    public IntegrationDtos.SeasonsResponseDto lookupCareerRecordsForLinks(
+            List<PlayerSourceLinkService.PlayerLink> links) {
+        if (links == null || links.isEmpty()) {
+            return createEmptyResponse();
+        }
+        List<IntegrationDtos.SeasonCareerRecordDto> allRecords = new ArrayList<>();
+        for (PlayerSourceLinkService.PlayerLink link : links) {
+            String source = link.source() == null ? "" : link.source().trim().toUpperCase(Locale.ROOT);
+            String sourcePlayerId = link.sourcePlayerId();
+            if (sourcePlayerId == null || sourcePlayerId.isBlank()) {
+                continue;
+            }
+            try {
+                if ("NJHS".equals(source)) {
+                    allRecords.addAll(jdbcTemplate.query(
+                            "SELECT source_player_id, player_name, season_label, league_name, team_name, " +
+                            "games_played, goals, assists, points, is_user_modified, created_at " +
+                            "FROM njhs_player_career WHERE source_player_id = ?",
+                            this::mapNjhsRecord, sourcePlayerId));
+                    continue;
+                }
+                String table = switch (source) {
+                    case "AYHL" -> "ayhl_player_career";
+                    case "THF" -> "thf_player_career";
+                    case "AHF" -> "ahf_player_career";
+                    default -> null;
+                };
+                if (table == null) {
+                    continue;
+                }
+                allRecords.addAll(jdbcTemplate.query(
+                        "SELECT source_player_id, player_name, season_label, league_name, team_name, " +
+                        "jersey_number, games_played, goals, assists, points, penalties, pim, " +
+                        "is_user_modified, created_at FROM " + table + " WHERE source_player_id = ?",
+                        (rs, rowNum) -> mapCareerRecord(source, rs), sourcePlayerId));
+            } catch (Exception e) {
+                log.warn("Career lookup failed for link {}:{} - {}", source, sourcePlayerId, e.getMessage());
+            }
+        }
+
+        allRecords.sort(Comparator
+            .comparing(IntegrationDtos.SeasonCareerRecordDto::season).reversed()
+            .thenComparing(IntegrationDtos.SeasonCareerRecordDto::source));
+
+        Set<String> availableSources = allRecords.stream()
+            .map(IntegrationDtos.SeasonCareerRecordDto::source)
+            .collect(Collectors.toSet());
+        Set<String> emptySources = Stream.of("AYHL", "THF", "AHF", "NJHS")
+            .filter(s -> !availableSources.contains(s))
+            .collect(Collectors.toSet());
+
+        return new IntegrationDtos.SeasonsResponseDto(
+            null,  // playerId set by controller
+            null,  // playerName set by controller
+            allRecords,
+            false,
+            null,
+            availableSources,
+            emptySources,
+            OffsetDateTime.now(ZoneOffset.UTC),
+            "private, max-age=300"
+        );
+    }
+
+    /** One career row from a linked identity (AYHL / THF / AHF share the shape). */
+    private IntegrationDtos.SeasonCareerRecordDto mapCareerRecord(String source, ResultSet rs)
+            throws SQLException {
+        OffsetDateTime created = rs.getTimestamp("created_at") != null
+                ? rs.getTimestamp("created_at").toInstant().atOffset(ZoneOffset.UTC)
+                : null;
+        Double pim = rs.getObject("pim") != null ? rs.getDouble("pim") : null;
+        return new IntegrationDtos.SeasonCareerRecordDto(
+            source,
+            rs.getString("source_player_id"),
+            rs.getString("player_name"),
+            rs.getString("season_label"),
+            rs.getString("league_name"),
+            rs.getString("team_name"),
+            rs.getString("jersey_number"),
+            rs.getObject("games_played") != null ? rs.getInt("games_played") : null,
+            rs.getObject("goals") != null ? rs.getInt("goals") : null,
+            rs.getObject("assists") != null ? rs.getInt("assists") : null,
+            rs.getObject("points") != null ? rs.getInt("points") : null,
+            rs.getObject("penalties") != null ? rs.getInt("penalties") : null,
+            pim,
+            rs.getObject("is_user_modified") != null && rs.getBoolean("is_user_modified"),
+            created,
+            false,
+            null
+        );
+    }
+
     /**
      * Convert AYHL entities to unified DTOs with source label.
      */

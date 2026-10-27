@@ -85,6 +85,10 @@ public class GameHistoryLookupService {
      * Game history for a player, with the season picker widened by the seasons
      * of the player's linked identities (so a season that only has season
      * totals so far still appears, with an empty game list).
+     *
+     * <p>When the player has CONFIRMED identity links, the games are read by
+     * those ids and NOT by name: two kids can share a name ("Max Liu" 10U and
+     * "Max Liu" 16AA), and name matching would put both in one player's page.
      */
     public IntegrationDtos.GameHistoryResponseDto lookupByPlayerName(
         String playerId,
@@ -95,14 +99,28 @@ public class GameHistoryLookupService {
         Set<String> canonicalNames = buildCanonicalLookupKeys(playerName);
         List<IntegrationDtos.GameHistoryGameDto> allGames = new ArrayList<>();
         Long overridePlayerId = parseProfileId(playerId);
+        Map<String, List<String>> idsBySource = linkedIdsBySource(links);
+        boolean useLinks = !idsBySource.isEmpty();
 
         for (Map.Entry<String, String> entry : SOURCE_TABLES.entrySet()) {
             String source = entry.getKey();
             String tableName = entry.getValue();
-            if (!tableExists(tableName) || canonicalNames.isEmpty()) {
+            if (!tableExists(tableName)) {
                 continue;
             }
-            allGames.addAll(loadGamesForSource(source, tableName, canonicalNames, overridePlayerId));
+            if (useLinks) {
+                // MHR games are keyed by the player PROFILE id; every other
+                // source stores its own player id.
+                List<String> ids = "MHR".equals(source)
+                    ? (playerId == null ? List.of() : List.of(playerId))
+                    : idsBySource.getOrDefault(source, List.of());
+                if (ids.isEmpty()) {
+                    continue;
+                }
+                allGames.addAll(loadGamesForSource(source, tableName, List.of(), ids, overridePlayerId));
+            } else if (!canonicalNames.isEmpty()) {
+                allGames.addAll(loadGamesForSource(source, tableName, canonicalNames, null, overridePlayerId));
+            }
         }
 
         // Seasons with game rows first (they keep their label), then any extra
@@ -157,13 +175,40 @@ public class GameHistoryLookupService {
         );
     }
 
+    /** Linked source ids per source, e.g. THF -> [19662]. Empty when nothing is linked. */
+    private static Map<String, List<String>> linkedIdsBySource(
+        List<PlayerSourceLinkService.PlayerLink> links
+    ) {
+        Map<String, List<String>> out = new LinkedHashMap<>();
+        if (links == null) {
+            return out;
+        }
+        for (PlayerSourceLinkService.PlayerLink link : links) {
+            if (link.source() == null || link.sourcePlayerId() == null
+                || link.sourcePlayerId().isBlank()) {
+                continue;
+            }
+            out.computeIfAbsent(link.source().trim().toUpperCase(Locale.ROOT), k -> new ArrayList<>())
+               .add(link.sourcePlayerId());
+        }
+        return out;
+    }
+
     private List<IntegrationDtos.GameHistoryGameDto> loadGamesForSource(
         String source,
         String tableName,
         Collection<String> canonicalNames,
+        List<String> linkedIds,
         Long overridePlayerId
     ) {
-        String placeholders = canonicalNames.stream().map(x -> "?").collect(Collectors.joining(","));
+        boolean byIds = linkedIds != null && !linkedIds.isEmpty();
+        if (!byIds && (canonicalNames == null || canonicalNames.isEmpty())) {
+            return List.of();
+        }
+        List<String> matchValues = byIds ? linkedIds : List.copyOf(canonicalNames);
+        String matchColumn = byIds ? "COALESCE(t.player_id::text, '')" :
+            "LOWER(REGEXP_REPLACE(COALESCE(t.player_name, ''), '[[:space:],.''-]', '', 'g'))";
+        String placeholders = matchValues.stream().map(x -> "?").collect(Collectors.joining(","));
         boolean hasScores = SCORE_SOURCES.contains(source);
         boolean hasOverrides = overridePlayerId != null && overrideTableAvailable();
 
@@ -188,14 +233,14 @@ public class GameHistoryLookupService {
             + " " + pimColumn + " AS pim"
             + scoreColumns + timeColumn + editedColumn + " "
             + "FROM " + tableName + " t" + overrideJoin + " "
-            + "WHERE LOWER(REGEXP_REPLACE(COALESCE(t.player_name, ''), '[[:space:],.''-]', '', 'g')) IN (" + placeholders + ")";
+            + "WHERE " + matchColumn + " IN (" + placeholders + ")";
 
         List<Object> params = new ArrayList<>();
         if (hasOverrides) {
             params.add(overridePlayerId);
             params.add(source);
         }
-        params.addAll(canonicalNames);
+        params.addAll(matchValues);
 
         return jdbcTemplate.query(sql, ps -> {
             for (int i = 0; i < params.size(); i++) {

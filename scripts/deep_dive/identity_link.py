@@ -263,6 +263,41 @@ def club_tokens(teams: Optional[str]) -> set[str]:
     return out
 
 
+# Age group in a team name: "Flyers Elite 10U", "Montclair Blues 16AA".
+_AGE_GROUP = re.compile(r"\b(\d{1,2})\s*U\b|\b(\d{1,2})\s*(?:AAA|AA|A|B)\b", re.IGNORECASE)
+
+
+def age_groups(teams: Optional[str]) -> set[int]:
+    """Age groups a team list plays in, e.g. {"Flyers Elite 10U"} -> {10}."""
+    out: set[int] = set()
+    for team in (teams or "").split(";"):
+        for match in _AGE_GROUP.finditer(team):
+            value = match.group(1) or match.group(2)
+            if value:
+                out.add(int(value))
+    return out
+
+
+def age_is_plausible(cand: dict, birthdate) -> bool:
+    """False when the candidate's age group cannot belong to this birthday.
+
+    Two kids named "Max Liu" play 10U and 16AA in the same season, and both
+    publish a birthdate-free roster row. A 2015-born kid cannot be on a 16AA
+    team, so the team's age group is enough to keep them apart. Playing up an
+    age group is normal, so two years of slack is allowed.
+    """
+    if birthdate is None:
+        return True
+    groups = age_groups(cand.get("teams"))
+    if not groups:
+        return True
+    years = season_years(cand.get("season_labels"))
+    if not years:
+        return True
+    age = max(years) - birthdate.year
+    return any(abs(age - group) <= 2 for group in groups)
+
+
 def extra_ids_to_fold(chosen: dict, cands: list[dict]) -> tuple[list[dict], list[str]]:
     """Ids of the same player under a retired number, plus why others are left out.
 
@@ -389,6 +424,12 @@ def main() -> None:
                 continue
             print(f"  player {p['player_id']} '{name}' "
                   f"(logins: {p['user_emails'] or 'none'}) keys={keys}")
+            # A tracked profile (a player somebody only FOLLOWS) has no birthdate,
+            # so nothing can tell two players with that name apart. Linking by
+            # name would happily attach a 16AA namesake to a 10U kid.
+            if p["birthdate"] is None:
+                print("    skipped: no birthdate, so a same-name player cannot be ruled out")
+                continue
             for source in SOURCE_TABLES:
                 # NJ HS deep-dive is only for high-school-age players who live
                 # in New Jersey (avoid matching same-name players elsewhere).
@@ -407,6 +448,14 @@ def main() -> None:
                 if not cands:
                     print(f"    {source}: no match")
                     continue
+                plausible = [c for c in cands if age_is_plausible(c, p["birthdate"])]
+                if not plausible:
+                    dropped = ", ".join(
+                        f"{c['source_player_id']} ({sorted(age_groups(c.get('teams')))})"
+                        for c in cands)
+                    print(f"    {source}: no age-appropriate match (dropped {dropped})")
+                    continue
+                cands = plausible
                 chosen = pick_candidate(cands)
                 if chosen is not None:
                     reason = "" if len(cands) == 1 else (

@@ -23,6 +23,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
 import java.util.Optional;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -109,10 +110,13 @@ public class SeasonsController {
             log.info("Seasons lookup: userId={}, playerId={}, playerName={}", 
                 userId, playerId, player.getFullName());
             
-            // Lookup career records
+            // Lookup career records — by linked identity when the player has one.
             try {
-                IntegrationDtos.SeasonsResponseDto response = careerLookupService
-                    .lookupCareerRecordsByName(player.getFullName());
+                List<PlayerSourceLinkService.PlayerLink> playerLinks =
+                    playerSourceLinkService.forPlayer(player.getId());
+                IntegrationDtos.SeasonsResponseDto response = playerLinks.isEmpty()
+                    ? careerLookupService.lookupCareerRecordsByName(player.getFullName())
+                    : careerLookupService.lookupCareerRecordsForLinks(playerLinks);
                 
                 // Set player info in response
                 response = new IntegrationDtos.SeasonsResponseDto(
@@ -185,7 +189,13 @@ public class SeasonsController {
         }
 
         PlayerProfile player = profileOpt.get();
-        IntegrationDtos.SeasonsResponseDto response = careerLookupService.lookupCareerRecordsByName(player.getFullName());
+        // Linked identities win over the name: two kids can share a name, and
+        // matching by name would mix their seasons together.
+        List<PlayerSourceLinkService.PlayerLink> links =
+            playerSourceLinkService.forPlayer(player.getId());
+        IntegrationDtos.SeasonsResponseDto response = links.isEmpty()
+            ? careerLookupService.lookupCareerRecordsByName(player.getFullName())
+            : careerLookupService.lookupCareerRecordsForLinks(links);
         response = new IntegrationDtos.SeasonsResponseDto(
             String.valueOf(player.getId()),
             player.getFullName(),
