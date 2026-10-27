@@ -59,6 +59,21 @@ def run(cmd) -> int:
     return subprocess.run(cmd).returncode
 
 
+# The games scrape that fills thf_games/ahf_games. It only runs on some days
+# (cron 04:00 Sun/Mon/Tue/Sat), so a player added today would otherwise wait for
+# its next turn before any game existed to roll into their history.
+GAMES_SCRIPT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "scrape_games_scheduled.sh"))
+
+
+def pending_players_need_games(cur) -> bool:
+    """True when a queued request belongs to a player with a THF/AHF identity."""
+    cur.execute(
+        "SELECT DISTINCT l.source FROM deep_dive_requests r "
+        "JOIN player_source_links l ON l.player_id = r.player_id "
+        "WHERE r.status = 'PENDING' AND l.source IN ('THF', 'AHF')")
+    return bool(cur.fetchall())
+
+
 def resolve_player_id(cur, player_id, user_id):
     """Legacy rows were queued per user; map them onto that login's player."""
     if player_id is not None:
@@ -94,6 +109,13 @@ def main() -> None:
         # Auto-link players first so queued requests (e.g. from "add player")
         # actually have source identities to deep-dive.
         run([PYTHON, os.path.join(SCRIPT_DIR, "identity_link.py")])
+        # Fetch the THF/AHF schedules + scoresheets for those players' teams
+        # before rolling them in, so a brand-new player gets games right away
+        # instead of waiting for the next scheduled scrape.
+        if pending_players_need_games(cur) and os.path.exists(GAMES_SCRIPT):
+            print("[scrape] refreshing THF/AHF games for the pending players", flush=True)
+            run(["/bin/bash", GAMES_SCRIPT, "targeted"])
+            conn.commit()
         for req_id, player_id, user_id in pending:
             player_id = resolve_player_id(cur, player_id, user_id)
             cur.execute(

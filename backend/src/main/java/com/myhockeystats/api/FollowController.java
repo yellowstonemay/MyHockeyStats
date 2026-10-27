@@ -5,6 +5,7 @@ import com.myhockeystats.model.User;
 import com.myhockeystats.model.UserPlayer;
 import com.myhockeystats.repository.UserRepository;
 import com.myhockeystats.security.JwtUtil;
+import com.myhockeystats.service.DeepDiveService;
 import com.myhockeystats.service.PlayerProfileService;
 import com.myhockeystats.service.PlayerSourceLinkService;
 import com.myhockeystats.service.integration.MhrGameLookupService;
@@ -71,6 +72,7 @@ public class FollowController {
     private final PlayerSourceLinkService playerSourceLinkService;
     private final PlayerProfileService playerProfileService;
     private final MhrGameLookupService mhrGameLookupService;
+    private final DeepDiveService deepDiveService;
 
     /** (source, player_id) -> display name + whether it's the signed-in user. */
     private record PlayerMeta(String name, boolean isMe) {}
@@ -78,13 +80,15 @@ public class FollowController {
     public FollowController(JwtUtil jwtUtil, UserRepository userRepository, JdbcTemplate jdbcTemplate,
                             PlayerSourceLinkService playerSourceLinkService,
                             PlayerProfileService playerProfileService,
-                            MhrGameLookupService mhrGameLookupService) {
+                            MhrGameLookupService mhrGameLookupService,
+                            DeepDiveService deepDiveService) {
         this.jwtUtil = jwtUtil;
         this.userRepository = userRepository;
         this.jdbcTemplate = jdbcTemplate;
         this.playerSourceLinkService = playerSourceLinkService;
         this.playerProfileService = playerProfileService;
         this.mhrGameLookupService = mhrGameLookupService;
+        this.deepDiveService = deepDiveService;
     }
 
     private Optional<User> resolveUser(String authHeader) {
@@ -272,7 +276,12 @@ public class FollowController {
             uid, source, spid, name);
         // Idempotent: also runs when the follow already existed, so a login that
         // followed before this behaviour existed still gets the read-only view.
-        attachFollowedPlayer(user.get(), source, spid);
+        Long followedProfileId = attachFollowedPlayer(user.get(), source, spid);
+        if (followedProfileId != null) {
+            // Pull their career + games now instead of waiting for the nightly
+            // job; the poller scrapes the team's schedule before rolling it in.
+            deepDiveService.enqueueForPlayer(followedProfileId, uid);
+        }
         if (inserted == 0) {
             return ResponseEntity.ok(Map.of("message", "You're already following " + name, "created", false));
         }
@@ -288,13 +297,13 @@ public class FollowController {
      * followed player is selectable and their tabs work, instead of the follow
      * only being a name in a list.
      */
-    private void attachFollowedPlayer(User user, String source, String sourcePlayerId) {
+    private Long attachFollowedPlayer(User user, String source, String sourcePlayerId) {
         if (user == null || source == null || sourcePlayerId == null || sourcePlayerId.isBlank()) {
-            return;
+            return null;
         }
         String src = source.trim().toUpperCase(Locale.ROOT);
         if (!SOURCES.contains(src)) {
-            return; // EP careers are not source ids a profile can be linked to
+            return null; // EP careers are not source ids a profile can be linked to
         }
         try {
             List<Long> profileIds = jdbcTemplate.queryForList(
@@ -312,18 +321,20 @@ public class FollowController {
                     "ON CONFLICT (player_id, source) DO UPDATE " +
                     "SET source_player_id = EXCLUDED.source_player_id, updated_at = NOW()",
                     tracked.getId(), src, sourcePlayerId);
-                return;
+                return tracked.getId();
             }
             long profileId = profileIds.get(0);
             if (playerProfileService.isLinked(user.getId(), profileId)) {
-                return; // already on the account — never downgrade an owner/parent link
+                return profileId; // already on the account — never downgrade an owner/parent link
             }
             playerProfileService.getProfileById(profileId).ifPresent(profile ->
                 playerProfileService.linkPlayer(user, profile, UserPlayer.RELATION_FAN));
+            return profileId;
         } catch (Exception ex) {
             // A follow must not fail because the read-only view could not be attached.
             log.warn("Could not attach followed player {}:{} to user {}: {}",
                 source, sourcePlayerId, user.getId(), ex.getMessage());
+            return null;
         }
     }
 

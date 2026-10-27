@@ -33,6 +33,15 @@ echo "=================================================================="
 echo " scrape_games_scheduled  mode=$MODE  season=$SEASON  at $TS"
 echo "=================================================================="
 
+# One run at a time: the cron fires this at 04:00 and the deep-dive poller can
+# ask for a targeted run when a player is added, and both rewrite the teams CSV.
+LOCK_DIR="$HOME/hockey-server/.scrape_games.lock"
+if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+  echo "another scrape_games run is in progress - skipping"
+  exit 0
+fi
+trap 'rmdir "$LOCK_DIR" 2>/dev/null' EXIT
+
 scrape_league() {
   local LEAGUE="$1"
   local CSV="data/${SEASON}-${LEAGUE}-teams.csv"
@@ -45,14 +54,25 @@ scrape_league() {
     # Source tag used in player_source_links / follows
     local TAG; [ "$LEAGUE" = "thf" ] && TAG=THF || TAG=AHF
     local TEAMIDS
-    TEAMIDS=$(docker exec -i hockey-postgres psql -U admin -d hockey_stats -t -A \
-      -c "SELECT DISTINCT r.team_id FROM ${LEAGUE}_rosters r
-          WHERE r.season_year=${SEASON}
-            AND r.player_id::text IN (
-              SELECT source_player_id FROM player_source_links WHERE source='${TAG}'
-              UNION
-              SELECT source_player_id FROM follows WHERE source='${TAG}'
-            );")
+    # Teams come from the roster row of the current season, and from the career
+    # row as a fallback — the weekly roster scrape lags a brand-new player, but
+    # their career record already names the team.
+    TEAMIDS=$(docker exec -i hockey-postgres psql -U admin -d hockey_stats -t -A -c "
+      WITH tracked_ids AS (
+        SELECT source_player_id FROM player_source_links WHERE source = '${TAG}'
+        UNION
+        SELECT source_player_id FROM follows WHERE source = '${TAG}'
+      )
+      SELECT DISTINCT team_id FROM (
+        SELECT r.team_id FROM ${LEAGUE}_rosters r
+        WHERE r.season_year = ${SEASON}
+          AND r.player_id::text IN (SELECT source_player_id FROM tracked_ids)
+        UNION
+        SELECT c.team_id FROM ${LEAGUE}_player_career c
+        WHERE c.team_id IS NOT NULL
+          AND c.season_label LIKE '${SEASON}-%'
+          AND c.source_player_id IN (SELECT source_player_id FROM tracked_ids)
+      ) t WHERE team_id IS NOT NULL;")
     TEAMIDS=$(echo "$TEAMIDS" | tr -d ' ' | grep -v '^$')
     if [ -z "$TEAMIDS" ]; then
       echo "no relevant ${LEAGUE} teams for registered/followed players this season - restoring csv, skipping"
