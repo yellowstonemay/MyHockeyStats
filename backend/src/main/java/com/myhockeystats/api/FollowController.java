@@ -66,6 +66,15 @@ public class FollowController {
         "NJHS", "njhs_player_games"
     );
 
+    /**
+     * source -> raw schedule table. THF/AHF per-player tables carry no score, so
+     * the feed joins the schedule to show the final result.
+     */
+    private static final Map<String, String> RAW_SCORE_TABLES = Map.of(
+        "THF", "thf_games",
+        "AHF", "ahf_games"
+    );
+
     private final JwtUtil jwtUtil;
     private final UserRepository userRepository;
     private final JdbcTemplate jdbcTemplate;
@@ -108,12 +117,21 @@ public class FollowController {
 
     private boolean overrideTableAvailable() {
         if (overrideTableAvailable == null) {
-            Integer found = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = ?",
-                Integer.class, "game_stat_overrides");
-            overrideTableAvailable = found != null && found > 0;
+            overrideTableAvailable = tableExistsInDb("game_stat_overrides");
         }
         return overrideTableAvailable;
+    }
+
+    private final Map<String, Boolean> tableExistsCache = new java.util.concurrent.ConcurrentHashMap<>();
+
+    private boolean tableExistsInDb(String tableName) {
+        return tableExistsCache.computeIfAbsent(tableName, name -> {
+            Integer found = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.tables " +
+                "WHERE table_schema = current_schema() AND table_name = ?",
+                Integer.class, name);
+            return found != null && found > 0;
+        });
     }
 
     // ─── name matching (mirrors identity_link.py / CareerLookupService) ───────
@@ -568,10 +586,31 @@ public class FollowController {
             String pimColumn = joinOverrides ? "COALESCE(o.pim, t.pim)" : "t.pim";
             String editedColumn = joinOverrides ? ", (o.id IS NOT NULL) AS stats_edited" : ", false AS stats_edited";
 
+            // Final score. AYHL/MHR keep it on the per-player row; THF/AHF only
+            // publish it on the raw schedule, so join that and orient by which
+            // side the player's team was on.
+            String rawScoreTable = RAW_SCORE_TABLES.get(source);
+            boolean rawScores = rawScoreTable != null && tableExistsInDb(rawScoreTable);
+            String rawScoreJoin = rawScores
+                ? " LEFT JOIN " + rawScoreTable + " rg"
+                    + " ON rg.season_year = t.season_year AND rg.game_id = t.game_id"
+                : "";
+            String scoreColumns;
+            if (rawScores) {
+                scoreColumns = ", CASE WHEN rg.game_id IS NULL THEN NULL"
+                    + " WHEN LOWER(COALESCE(t.team_for, '')) = LOWER(COALESCE(rg.home_team, ''))"
+                    + " THEN rg.home_goals ELSE rg.away_goals END AS score_for"
+                    + ", CASE WHEN rg.game_id IS NULL THEN NULL"
+                    + " WHEN LOWER(COALESCE(t.team_for, '')) = LOWER(COALESCE(rg.home_team, ''))"
+                    + " THEN rg.away_goals ELSE rg.home_goals END AS score_against";
+            } else {
+                scoreColumns = ", t.score_for, t.score_against";
+            }
+
             String sql = "SELECT t.player_id, t.game_id, t.season_year, t.game_date, t.team_for, t.team_against,"
                 + " " + goalsColumn + " AS goals, " + assistsColumn + " AS assists, t.points AS scraped_points,"
-                + " " + pimColumn + " AS pim, t.game_type, t.league" + editedColumn
-                + " FROM " + table + " t" + overrideJoin
+                + " " + pimColumn + " AS pim, t.game_type, t.league" + scoreColumns + editedColumn
+                + " FROM " + table + " t" + overrideJoin + rawScoreJoin
                 + " WHERE t.player_id IN (" + placeholders + ")"
                 + " AND t.game_date IS NOT NULL ORDER BY t.game_date DESC, t.game_id DESC LIMIT 30";
 
@@ -616,6 +655,9 @@ public class FollowController {
                     m.put("assists", assists);
                     m.put("points", points);
                     m.put("pim", (Integer) rs.getObject("pim"));
+                    // Null when the league has not published a result yet.
+                    m.put("scoreFor", (Integer) rs.getObject("score_for"));
+                    m.put("scoreAgainst", (Integer) rs.getObject("score_against"));
                     m.put("statsEdited", edited);
                     return m;
                 });
@@ -657,6 +699,8 @@ public class FollowController {
                 m.put("assists", g.assists());
                 m.put("points", g.points());
                 m.put("pim", g.pim());
+                m.put("scoreFor", g.scoreFor());
+                m.put("scoreAgainst", g.scoreAgainst());
                 m.put("statsEdited", g.statsEdited());
                 entries.add(m);
             }

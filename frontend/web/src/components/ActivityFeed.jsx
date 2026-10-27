@@ -57,6 +57,24 @@ function gameTypeLabel(gameType) {
   return MHR_GAME_TYPES[value] || value.replace(/\s*game$/i, '')
 }
 
+/** "W 6-2" / "L 2-3" / "T 2-2" — null until the league publishes a result. */
+function resultLabel(game) {
+  const forGoals = game?.scoreFor
+  const againstGoals = game?.scoreAgainst
+  if (forGoals == null || againstGoals == null) return ''
+  const outcome = forGoals > againstGoals ? 'W' : forGoals < againstGoals ? 'L' : 'T'
+  return `${outcome} ${forGoals}-${againstGoals}`
+}
+
+function resultTone(game) {
+  const forGoals = game?.scoreFor
+  const againstGoals = game?.scoreAgainst
+  if (forGoals == null || againstGoals == null) return ''
+  if (forGoals > againstGoals) return 'bg-emerald-100 text-emerald-800'
+  if (forGoals < againstGoals) return 'bg-rose-100 text-rose-700'
+  return 'bg-slate-100 text-slate-600'
+}
+
 const COPY = {
   mine: {
     description: "Latest games for the player you're viewing",
@@ -221,6 +239,11 @@ export default function ActivityFeed({ playerId, scope = 'all', limit = 10, canE
                     </div>
                     <div className="text-xs text-slate-500 truncate">
                       {g.date || '—'}{formatTime(g.time) ? ` ${formatTime(g.time)}` : ''} · {g.opponent || g.teamFor || 'game'}
+                      {resultLabel(g) && (
+                        <span className={`ml-2 px-1.5 py-0.5 rounded text-[10px] font-semibold ${resultTone(g)}`}>
+                          {resultLabel(g)}
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div className="text-right shrink-0">
