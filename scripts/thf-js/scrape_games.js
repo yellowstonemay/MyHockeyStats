@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const http = require('http');
 const https = require('https');
+const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 const { parse } = require('csv-parse/sync');
 const { Pool } = require('pg');
@@ -290,7 +291,11 @@ function parseScoresheetPdfToJson(pdfPath) {
         return null;
     }
 
-    const pythonExe = process.env.PYTHON_PATH || process.env.PYTHON || 'python';
+    // The parser needs pdfplumber, which only the deep-dive venv has; without
+    // this the fallback silently fails whenever PYTHON is not exported.
+    const venvPython = path.join(__dirname, '..', 'deep_dive', '.venv', 'bin', 'python');
+    const pythonExe = process.env.PYTHON_PATH || process.env.PYTHON
+        || (fs.existsSync(venvPython) ? venvPython : 'python');
     const result = spawnSync(
         pythonExe,
         [parserScript, pdfPath, '--stdout'],
@@ -457,6 +462,163 @@ function getLastTeamIdFromOutput(outputPath) {
     return String(row[0] || '').trim() || null;
 }
 
+// ── Game Center (TimeToScore "web" API) ────────────────────────────────// The federation schedule's Game Center link is served by a TimeToScore widget.
+// The widget's HTML carries its API credentials in #team-root:
+//   data-api-base / data-api-key / data-api-secret   (the secret is ROT13'd)
+// Requests have to be signed, so a plain GET is refused (HTTP 403 "forbidden"):
+//   GET <api-base>/<endpoint>?<sorted params>&auth_signature=<hex hmac>
+//   signature = HMAC_SHA256(secret, `GET\n/<endpoint>\n<sorted params>`)
+//   auth_key, auth_timestamp and body_md5 (md5 of an empty body) are part of
+//   the signed params.
+//   get_game_rosters?game_id= -> home_players / away_players, each with the
+//   game's goals, assists and penalty minutes. Those totals match the published
+//   final score, which is exactly what the scorecard PDF parser kept getting
+//   wrong, so this replaces PDF parsing (the PDF stays as a fallback).
+const TTS_EMPTY_BODY_MD5 = 'd41d8cd98f00b204e9800998ecf8427e';
+
+// Cookies are per host; the signed API needs none, but the scorecard host
+// hands out a session cookie and behaves better when it is sent back.
+const _cookieJars = new Map();
+
+function cookieJar(hostname) {
+    if (!_cookieJars.has(hostname)) _cookieJars.set(hostname, new Map());
+    return _cookieJars.get(hostname);
+}
+
+let _ttsConfigPromise = null;
+
+/** The widget stores its secret rotated by half the alphabet. */
+function rot13(value) {
+    return String(value).replace(/[a-zA-Z]/g, (ch) => {
+        const base = ch === ch.toLowerCase() ? 97 : 65;
+        return String.fromCharCode(((ch.charCodeAt(0) - base + 13) % 26) + base);
+    });
+}
+
+const encodeParam = (value) => encodeURIComponent(value).replace(/%20/g, '+');
+
+/** Params sorted by name and joined exactly the way the widget signs them. */
+function canonicalQuery(params) {
+    return Object.keys(params)
+        .sort()
+        .map((key) => `${encodeParam(key)}=${encodeParam(params[key])}`)
+        .join('&');
+}
+
+/** Read api base/key/secret once from a team page (both leagues share them). */
+async function ttsConfig(teamPageUrl) {
+    if (!_ttsConfigPromise) {
+        _ttsConfigPromise = (async () => {
+            const html = (await fetchBufferWithRedirects(teamPageUrl)).toString('utf8');
+            const tag = html.match(/<[^>]*id="team-root"[^>]*>/i);
+            if (!tag) throw new Error('no widget config on the team page');
+            const attr = (name) => {
+                const m = tag[0].match(new RegExp(`data-${name}="([^"]*)"`, 'i'));
+                return m ? m[1] : '';
+            };
+            const base = attr('api-base').replace(/\/+$/, '');
+            const key = attr('api-key');
+            const secret = rot13(attr('api-secret'));
+            if (!base || !key || !secret) throw new Error('incomplete widget config');
+            return { base, key, secret };
+        })().catch((err) => {
+            _ttsConfigPromise = null;   // try again on the next game
+            throw err;
+        });
+    }
+    return _ttsConfigPromise;
+}
+
+async function ttsGet(endpoint, params, teamPageUrl) {
+    const config = await ttsConfig(teamPageUrl);
+    const signed = {
+        auth_key: config.key,
+        auth_timestamp: String(Math.floor(Date.now() / 1000)),
+        body_md5: TTS_EMPTY_BODY_MD5,
+        ...params
+    };
+    const query = canonicalQuery(signed);
+    const signature = crypto.createHmac('sha256', config.secret)
+        .update(`GET\n/${endpoint}\n${query}`)
+        .digest('hex');
+    const buffer = await fetchBufferWithRedirects(
+        `${config.base}/${endpoint}?${query}&auth_signature=${signature}`);
+    const text = buffer.toString('utf8').trim();
+    if (!text.startsWith('{') && !text.startsWith('[')) {
+        throw new Error(`non-JSON response from ${endpoint}`);
+    }
+    return JSON.parse(text);
+}
+
+/**
+ * Build our scoresheet JSON (same shape the PDF parser produced) from the
+ * Game Center roster feed. expectedHome/Away are the published final score, so
+ * a card whose goals do not add up is rejected instead of stored.
+ */
+async function fetchLiveScoresheet(gameId, gameDate, gameTime, opts = {}) {
+    const { homeTeam = '', awayTeam = '', expectedHome = null, expectedAway = null, teamPageUrl } = opts;
+    const rosters = await ttsGet('get_game_rosters', { game_id: String(gameId) }, teamPageUrl);
+
+    const side = (list) => {
+        const out = {};
+        let goals = 0;
+        for (const p of list || []) {
+            const name = String(p.name || '').trim();
+            if (!name) continue;
+            const playerGoals = Number(p.goals || 0);
+            const assists = Number(p.assists || 0);
+            const pims = Number(p.min || p.pims || 0);
+            const jersey = String(p.game_jersey || '').trim() || String(p.player_id || name);
+            out[jersey] = {
+                name,
+                goals: playerGoals,
+                assists,
+                points: playerGoals + assists,
+                pims
+            };
+            goals += playerGoals;
+        }
+        return { roster: out, goals };
+    };
+
+    const home = side(rosters.home_players);
+    const away = side(rosters.away_players);
+    if (!Object.keys(home.roster).length && !Object.keys(away.roster).length) {
+        // Lineups are only published once the game is under way; storing an
+        // empty card would freeze it forever, so ask again next run.
+        throw new Error('lineups not published yet');
+    }
+
+    if (Number.isFinite(expectedHome) && home.goals !== expectedHome) {
+        throw new Error(`scorer goals ${home.goals} do not match the final score ${expectedHome}`);
+    }
+    if (Number.isFinite(expectedAway) && away.goals !== expectedAway) {
+        throw new Error(`scorer goals ${away.goals} do not match the final score ${expectedAway}`);
+    }
+
+    return {
+        game_id: String(gameId),
+        game_date: gameDate || null,
+        game_time: gameTime || null,
+        home_team: homeTeam,
+        visitor_team: awayTeam,
+        home_goals: home.goals,
+        visitor_goals: away.goals,
+        home_roster: home.roster,
+        visitor_roster: away.roster,
+        source: 'tts_api'
+    };
+}
+
+/** The scorer's goals must add up to the published final score. */
+function liveSheetReconciles(sheet) {
+    const sum = (side) => Object.values(sheet[side] || {})
+        .reduce((total, e) => total + Math.round(Number((e || {}).goals) || 0), 0);
+    const ok = sum('home_roster') === sheet.home_goals
+        && sum('visitor_roster') === sheet.visitor_goals;
+    return ok ? null : `${sum('home_roster')}-${sum('visitor_roster')}`;
+}
+
 function fetchBufferWithRedirects(url, redirectsLeft = 5) {
     return new Promise((resolve, reject) => {
         let parsed;
@@ -468,19 +630,35 @@ function fetchBufferWithRedirects(url, redirectsLeft = 5) {
         }
 
         const client = parsed.protocol === 'https:' ? https : http;
+        const jar = cookieJar(parsed.hostname);
+        const headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        };
+        if (jar.size) {
+            headers.Cookie = [...jar].map(([name, value]) => `${name}=${value}`).join('; ');
+        }
+
         const req = client.get(
             {
                 hostname: parsed.hostname,
                 port: parsed.port || undefined,
                 path: `${parsed.pathname}${parsed.search}`,
                 protocol: parsed.protocol,
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                }
+                headers
             },
             (res) => {
                 const status = res.statusCode || 0;
                 const location = res.headers.location;
+                const cookies = res.headers['set-cookie'];
+                if (cookies) {
+                    for (const line of cookies) {
+                        const pair = String(line).split(';')[0];
+                        const eq = pair.indexOf('=');
+                        if (eq > 0) {
+                            jar.set(pair.slice(0, eq).trim(), pair.slice(eq + 1).trim());
+                        }
+                    }
+                }
 
                 if ([301, 302, 303, 307, 308].includes(status) && location) {
                     if (redirectsLeft <= 0) {
@@ -772,27 +950,65 @@ async function scrapeGames(league, seasonYear, options = {}) {
 
                     const scoresheetLink = String(g.scoresheet_link || '').trim();
                     const gameDate = String(g.date || '').trim();
-                    const alreadyParsed = dbSync && jsonState.get(gameId) === true;
+                    // A sheet is only final once the day is over: a card pulled
+                    // mid-game must be refreshed by a later run the same day.
+                    const alreadyParsed = dbSync && jsonState.get(gameId) === true
+                        && (!gameDate || gameDate < todayIso());
                     const isExisting = dbSync && jsonState.has(gameId);
-                    // A card cannot exist before the puck drops. A card that has
-                    // not appeared within SHEET_RETRY_DAYS of an already-stored
-                    // game is not coming (the source never posted it), so stop
-                    // asking — that keeps the weekly full run bounded.
-                    const resultsPossible = !gameDate
-                        || (gameDate <= todayIso()
-                            && (!isExisting || gameDate >= daysAgoIso(SHEET_RETRY_DAYS)));
+                    // The schedule row itself says whether the game is done:
+                    // CLOSED = finalized, OPEN = in progress, NOT STARTED =
+                    // upcoming. Only a finalized game can have a card, so skip
+                    // the rest instead of asking for one that cannot exist.
+                    const gameStatus = String(g.game_status || '').trim().toUpperCase();
+                    const finalized = !gameStatus || gameStatus === 'CLOSED';
+                    // A card that has not appeared within SHEET_RETRY_DAYS of an
+                    // already-stored game is not coming (the source never posted
+                    // it), so stop asking — that keeps the weekly full run bounded.
+                    const resultsPossible = finalized
+                        && (!gameDate
+                            || (gameDate <= todayIso()
+                                && (!isExisting || gameDate >= daysAgoIso(SHEET_RETRY_DAYS))));
                     let scoresheetPdfPath = '';
                     let scoresheetJson = null;
 
                     if (gameId && scoresheetLink && !alreadyParsed && resultsPossible) {
-                        const pdfOutput = path.join(scoresheetDir, `${gameId}.pdf`);
+                        // Game Center first: exact per-player data, no PDF layout
+                        // to guess at. The PDF stays as a fallback for a game
+                        // whose live card never got published.
                         try {
-                            await downloadScoresheetPdf(scoresheetLink, pdfOutput);
-                            scoresheetPdfPath = path.relative(__dirname, pdfOutput).replace(/\\/g, '/');
-                            scoresheetJson = parseScoresheetPdfToJson(pdfOutput);
-                            // The PDF layout is parsed by position, so verify the
-                            // per-player goals add up to the published final score
-                            // and shout when they don't (a sheet we should look at).
+                            const liveSheet = await fetchLiveScoresheet(
+                                gameId, gameDate, String(g.time || '').trim(), {
+                                    homeTeam: String(g.home_team || '').trim(),
+                                    awayTeam: String(g.away_team || '').trim(),
+                                    expectedHome: toInt(g.home_goals),
+                                    expectedAway: toInt(g.away_goals),
+                                    teamPageUrl: team.url
+                                });
+                            const mismatch = liveSheetReconciles(liveSheet);
+                            if (mismatch) {
+                                // Never store a card whose goals do not add up to
+                                // the published score; retry it on the next run.
+                                console.warn(`  ${gameId}: game center goals ${mismatch} do not match`
+                                    + ` the final score ${liveSheet.home_goals}-${liveSheet.visitor_goals}`
+                                    + ' - not storing, will retry');
+                            } else {
+                                scoresheetJson = liveSheet;
+                            }
+                        } catch (liveErr) {
+                            console.log(`  ${gameId}: game center unavailable (${liveErr.message}) - trying the PDF`);
+                            const pdfOutput = path.join(scoresheetDir, `${gameId}.pdf`);
+                            try {
+                                await downloadScoresheetPdf(scoresheetLink, pdfOutput);
+                                scoresheetPdfPath = path.relative(__dirname, pdfOutput).replace(/\\/g, '/');
+                                scoresheetJson = parseScoresheetPdfToJson(pdfOutput);
+                            } catch (downloadErr) {
+                                console.log(`  ${gameId}: no scoresheet yet`
+                                    + ` (game center: ${liveErr.message}; pdf: ${downloadErr.message})`);
+                            }
+                        }
+                        if (scoresheetJson) {
+                            // The per-player goals must add up to the published
+                            // final score; shout when they don't.
                             const summed = (side) => Object.values(scoresheetJson?.[side] || {})
                                 .reduce((sum, e) => sum + Math.round(Number((e || {}).goals) || 0), 0);
                             const hg = Number(g.home_goals);
@@ -800,10 +1016,8 @@ async function scrapeGames(league, seasonYear, options = {}) {
                             if (Number.isFinite(hg) && Number.isFinite(ag)
                                 && (summed('home_roster') !== hg || summed('visitor_roster') !== ag)) {
                                 console.warn(`  ${gameId}: sheet goals ${summed('home_roster')}-${summed('visitor_roster')}`
-                                    + ` but final score is ${hg}-${ag}`);
+                                    + ` but final score is ${hg}-${ag} (${scoresheetJson.source})`);
                             }
-                        } catch (downloadErr) {
-                            console.log(`  ${gameId}: no scoresheet yet (${downloadErr.message})`);
                         }
                     }
 
