@@ -57,6 +57,11 @@ GAMES_DIR.mkdir(parents=True, exist_ok=True)
 
 PLAYER_PAGE_URL = "https://atlantichockey.org/playerpage.php"
 
+# 2026-27 relaunch: the league site became a WordPress app whose data comes from
+# /wp-json/ayhl/v1/. The old playerpage.php returns 404 for every player, which
+# silently stopped the whole per-game feed ("Players scraped: 0").
+API_BASE = "https://atlantichockey.org/wp-json/ayhl/v1"
+
 
 # ---------------------------------------------------------------------------
 # CLI
@@ -156,16 +161,25 @@ def _get_session() -> requests.Session:
     return _SESSION
 
 
-def fetch_player_page(player_id: str, season_id: int, timeout: int = 20) -> str | None:
-    url = PLAYER_PAGE_URL
-    params = {"playerid": player_id, "seasonid": str(season_id)}
+def fetch_player_payload(player_id: str, season_id: int, timeout: int = 25) -> dict | None:
+    """Return a player's season payload (career rows + per-game stats) as JSON."""
+    url = f"{API_BASE}/players/{player_id}/"
     try:
-        resp = _get_session().get(url, params=params, timeout=timeout)
+        resp = _get_session().get(
+            url,
+            params={"season": str(season_id)},
+            headers={"Accept": "application/json, text/plain, */*"},
+            timeout=timeout,
+        )
         resp.raise_for_status()
-        return resp.text
-    except requests.RequestException as exc:
+        payload = resp.json()
+    except (requests.RequestException, ValueError) as exc:
         print(f"  [WARN] HTTP error for player {player_id}: {exc}")
         return None
+    if not isinstance(payload, dict) or "games" not in payload:
+        print(f"  [WARN] Unexpected payload for player {player_id}")
+        return None
+    return payload
 
 
 # ---------------------------------------------------------------------------
@@ -204,59 +218,40 @@ def _strip_tags(value: str) -> str:
     return unescape(text).replace("\xa0", " ").strip()
 
 
-def parse_games_table(html: str, player_id: str, player_name: str,
-                      season_year: int, season_id: int) -> list[dict[str, Any]]:
+def _season_window(season_year: int) -> tuple[date, date]:
+    """Jul 1 Y .. Jun 30 Y+1 - the window a season's games must fall in."""
+    return date(season_year, 7, 1), date(season_year + 1, 6, 30)
+
+
+def parse_games_payload(payload: dict, player_id: str, player_name: str,
+                        season_year: int, season_id: int) -> list[dict[str, Any]]:
+    """Per-game rows from the API payload.
+
+    The endpoint always returns the CURRENT season's games (it reports the season
+    it actually served in ``season``), so rows dated outside the requested
+    season's window are dropped rather than filed under the wrong season.
     """
-    Parse the "Statistics By Game" table from a player page.
-
-    Expected columns (in order):
-        Game ID | Date | Game Type | League | Team For | Team Against |
-        G | G(PP) | G(SH) | G(SO) | A | P | PIM
-    """
-    heading_match = re.search(
-        r"Statistics By Game</h[234]>\s*<table class=\"w3-table\">\s*<tr><td>\s*<table[^>]*>(.*?)</table>",
-        html,
-        re.IGNORECASE | re.DOTALL,
-    )
-    if not heading_match:
-        return []
-
-    table_html = heading_match.group(1)
-    row_matches = re.findall(r"<tr\b[^>]*>(.*?)</tr>", table_html, re.IGNORECASE | re.DOTALL)
-    if not row_matches:
-        return []
-
-    header_cells_raw = re.findall(r"<th\b[^>]*>(.*?)</(?:th|td)>", row_matches[0], re.IGNORECASE | re.DOTALL)
-    header_cells = [_strip_tags(cell) for cell in header_cells_raw]
-    normalised = [c.lower().replace(" ", "").replace("(", "").replace(")", "") for c in header_cells]
-    col_map = {name: idx for idx, name in enumerate(normalised)}
-
-    if "gameid" not in col_map:
-        return []
-
-    # Required columns
-    required = {"gameid", "date", "teamfor", "teamagainst", "g", "a", "p", "pim"}
-    if not required.issubset(col_map):
-        print(f"  [WARN] Unexpected table columns for player {player_id}: {list(col_map.keys())}")
-        return []
+    player_name = ((payload.get("player") or {}).get("name") or player_name or "").strip()
+    label = season_label(season_year)
+    window_start, window_end = _season_window(season_year)
+    scraped_at = datetime.utcnow().isoformat()
 
     games: list[dict[str, Any]] = []
-    scraped_at = datetime.utcnow().isoformat()
-    label = season_label(season_year)
-
-    for row_html in row_matches[1:]:
-        cells = [_strip_tags(cell) for cell in re.findall(r"<td\b[^>]*>(.*?)</td>", row_html, re.IGNORECASE | re.DOTALL)]
-        if len(cells) < len(col_map):
+    dropped = 0
+    for row in payload.get("games") or []:
+        if not isinstance(row, dict):
             continue
-
-        def col(name: str) -> str:
-            idx = col_map.get(name)
-            return cells[idx].strip() if idx is not None and idx < len(cells) else ""
-
-        game_id = col("gameid")
+        raw_date = str(row.get("date") or "").strip()
+        try:
+            game_date = date.fromisoformat(raw_date)
+        except ValueError:
+            continue
+        if not window_start <= game_date <= window_end:
+            dropped += 1
+            continue
+        game_id = str(row.get("id") or "").strip()
         if not game_id:
             continue
-
         games.append({
             "player_id": player_id,
             "player_name": player_name,
@@ -264,21 +259,23 @@ def parse_games_table(html: str, player_id: str, player_name: str,
             "season_label": label,
             "season_id": str(season_id),
             "game_id": game_id,
-            "game_date": _parse_date(col("date")),
-            "game_type": col("gametype") or None,
-            "league": col("league") or None,
-            "team_for": col("teamfor") or None,
-            "team_against": col("teamagainst") or None,
-            "goals": _safe_int(col("g")),
-            "goals_pp": _safe_int(col("gpp")),
-            "goals_sh": _safe_int(col("gsh")),
-            "goals_so": _safe_int(col("gso")),
-            "assists": _safe_int(col("a")),
-            "points": _safe_int(col("p")),
-            "pim": _safe_int(col("pim")),
+            "game_date": game_date.isoformat(),
+            "game_type": row.get("type") or None,
+            "league": row.get("league") or None,
+            "team_for": (row.get("team") or {}).get("name") or None,
+            "team_against": (row.get("opponent") or {}).get("name") or None,
+            "goals": row.get("goals"),
+            "goals_pp": row.get("goals_pp"),
+            "goals_sh": row.get("goals_sh"),
+            "goals_so": row.get("goals_so"),
+            "assists": row.get("assists"),
+            "points": row.get("points"),
+            "pim": row.get("pim"),
             "scraped_at": scraped_at,
         })
 
+    if dropped:
+        print(f"  [WARN] dropped {dropped} row(s) dated outside this season")
     return games
 
 
@@ -531,12 +528,12 @@ def main() -> None:
             continue
 
         print(f"  [{idx}/{len(all_players)}] Scraping: {pid} {pname} ...", end=" ", flush=True)
-        html = fetch_player_page(pid, season_id)
-        if html is None:
+        payload = fetch_player_payload(pid, season_id)
+        if payload is None:
             print("FAILED (HTTP error)")
             continue
 
-        games = parse_games_table(html, pid, pname, season_year, season_id)
+        games = parse_games_payload(payload, pid, pname, season_year, season_id)
         print(f"{len(games)} games")
 
         if game_checkpoint_enabled:

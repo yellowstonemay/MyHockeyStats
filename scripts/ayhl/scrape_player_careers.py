@@ -20,6 +20,8 @@ import os
 import sys
 import time
 import re
+
+import requests
 from playwright.sync_api import sync_playwright
 
 THIS_DIR = os.path.dirname(__file__)
@@ -27,6 +29,67 @@ DATA_DIR = os.path.join(THIS_DIR, 'data')
 PAGES_DIR = os.path.join(DATA_DIR, 'player_pages')
 if not os.path.exists(PAGES_DIR):
     os.makedirs(PAGES_DIR, exist_ok=True)
+
+# 2026-27 relaunch: playerpage.php answers 404 for every player, and the league
+# serves the same career table as JSON from its WordPress REST API.
+API_BASE = 'https://atlantichockey.org/wp-json/ayhl/v1'
+API_HEADERS = {
+    'User-Agent': ('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 '
+                   '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'),
+    'Accept': 'application/json, text/plain, */*',
+}
+
+_api_session = None
+
+
+def fetch_career_payload(player_id):
+    """Return the player's API payload (player meta + career rows) or None."""
+    global _api_session
+    if _api_session is None:
+        _api_session = requests.Session()
+        _api_session.headers.update(API_HEADERS)
+    try:
+        resp = _api_session.get(f'{API_BASE}/players/{player_id}/', timeout=25)
+        resp.raise_for_status()
+        payload = resp.json()
+    except (requests.RequestException, ValueError) as exc:
+        print(f'   [WARN] API error for {player_id}: {exc}')
+        return None
+    if not isinstance(payload, dict) or 'career' not in payload:
+        return None
+    return payload
+
+
+def career_rows_from_api(payload):
+    """Career rows in the key shape daily_update.py expects from the HTML table."""
+    rows = []
+    for entry in payload.get('career') or []:
+        season = (entry.get('season') or {}).get('label') or ''
+        if not season:
+            continue
+        rows.append({
+            'Season': season,
+            'League': entry.get('league') or '',
+            'Teams': (entry.get('team') or {}).get('name') or '',
+            'Games': entry.get('gp'),
+            'Goals': entry.get('goals'),
+            'Assists': entry.get('assists'),
+            'Points': entry.get('points'),
+            'Penalties': entry.get('penalties'),
+            'PIM': entry.get('pim'),
+        })
+    return rows
+
+
+def player_meta_from_api(payload, fallback_name=''):
+    player = payload.get('player') or {}
+    return {
+        'player_name': player.get('name') or fallback_name,
+        'birthday': player.get('birth_month_year') or '',
+        'hometown': player.get('hometown') or '',
+        'position': player.get('position_label') or '',
+        'shoots': player.get('shoots') or '',
+    }
 
 
 def is_transient_navigation_error(message):
@@ -253,11 +316,19 @@ def main():
     empty_carrer_set = set(progress.get('empty_carrer_ids', []))
     need_retry_set = set(progress.get('need_retry_ids', []))
 
-    # Load existing JSON output and infer completed ids from it.
+    # Load existing JSON output (kept so a partial run does not lose players).
     career_by_player = load_career_json(out_all)
-    completed_set |= set(career_by_player.keys())
-    # Backward-compatible inference from legacy CSV if it exists.
-    completed_set |= load_completed_ids_from_career_csv(legacy_csv)
+    # Having an entry in the aggregated JSON only means "fetched at some point".
+    # Season stats change as games are played, so that must NOT count as done -
+    # otherwise a player's career row is never refreshed after the first scrape
+    # (Ethan Yan sat at 3 GP / 1 G while the league already had 4 GP / 3 G).
+    # The progress file is the only resume signal, and when it already covers
+    # every requested player the previous run finished -> start fresh.
+    if completed_set and ordered_input_ids and set(ordered_input_ids).issubset(completed_set):
+        print('Progress covers all players (previous run finished) - refreshing from scratch.')
+        completed_set = set()
+        empty_carrer_set = set()
+        need_retry_set = set()
 
     def save_career_json():
         try:
@@ -313,6 +384,28 @@ def main():
             # mark current player being processed and persist immediately
             save_progress(current_player_id=pid)
             try:
+                # Prefer the league's JSON API (the HTML player page is gone).
+                payload = fetch_career_payload(pid)
+                if payload is not None:
+                    career_rows = career_rows_from_api(payload)
+                    if not career_rows:
+                        print(f'   No career rows in API for {pid}')
+                        empty_carrer_set.add(pid)
+                        save_progress(current_player_id=None)
+                        continue
+                    career_by_player[pid] = {
+                        **player_meta_from_api(payload, provided_name),
+                        'career': career_rows,
+                    }
+                    save_career_json()
+                    print(f'   wrote {len(career_rows)} career rows for {pid} '
+                          f"({career_by_player[pid]['player_name']}) [api]")
+                    completed_set.add(pid)
+                    empty_carrer_set.discard(pid)
+                    save_progress(current_player_id=None)
+                    time.sleep(0.05)
+                    continue
+
                 url = f'https://atlantichockey.org/playerpage.php?playerid={pid}'
                 print(f'[{i}/{total_to_process}] Fetching player {pid} -> {url}')
                 page.goto(url, timeout=20000)
