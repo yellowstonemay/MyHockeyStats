@@ -134,6 +134,24 @@ public class FollowController {
         });
     }
 
+    private final Map<String, Boolean> columnExistsCache = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * Cached "does this game table have this column" answer. The per-source game
+     * tables do not share a schema (THF/AHF carry no score at all, NJHS keeps the
+     * score inside a single "W 7-1" result string), so the SQL has to be built
+     * from what is actually there instead of assuming.
+     */
+    private boolean tableHasColumn(String tableName, String columnName) {
+        return columnExistsCache.computeIfAbsent(tableName + "." + columnName, key -> {
+            Integer found = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.columns " +
+                "WHERE table_schema = current_schema() AND table_name = ? AND column_name = ?",
+                Integer.class, tableName, columnName);
+            return found != null && found > 0;
+        });
+    }
+
     // ─── name matching (mirrors identity_link.py / CareerLookupService) ───────
     private static String normalizeName(String v) {
         if (v == null || v.isBlank()) return "";
@@ -596,6 +614,10 @@ public class FollowController {
                     + " ON rg.season_year = t.season_year AND rg.game_id = t.game_id"
                 : "";
             String scoreColumns;
+            boolean tableScores = tableHasColumn(table, "score_for")
+                && tableHasColumn(table, "score_against");
+            // NJHS has neither score column: it stores "W 7-1" / "T 4-4" instead.
+            boolean resultColumn = !tableScores && tableHasColumn(table, "result");
             if (rawScores) {
                 scoreColumns = ", CASE WHEN rg.game_id IS NULL THEN NULL"
                     + " WHEN LOWER(COALESCE(t.team_for, '')) = LOWER(COALESCE(rg.home_team, ''))"
@@ -603,8 +625,16 @@ public class FollowController {
                     + ", CASE WHEN rg.game_id IS NULL THEN NULL"
                     + " WHEN LOWER(COALESCE(t.team_for, '')) = LOWER(COALESCE(rg.home_team, ''))"
                     + " THEN rg.away_goals ELSE rg.home_goals END AS score_against";
-            } else {
+            } else if (tableScores) {
                 scoreColumns = ", t.score_for, t.score_against";
+            } else if (resultColumn) {
+                scoreColumns = ", CASE WHEN t.result ~ '^[WLT] [0-9]+-[0-9]+$'"
+                    + " THEN split_part(split_part(t.result, ' ', 2), '-', 1)::int END AS score_for"
+                    + ", CASE WHEN t.result ~ '^[WLT] [0-9]+-[0-9]+$'"
+                    + " THEN split_part(split_part(t.result, ' ', 2), '-', 2)::int END AS score_against";
+            } else {
+                // No score published by this source; leave the result blank.
+                scoreColumns = ", NULL AS score_for, NULL AS score_against";
             }
 
             String sql = "SELECT t.player_id, t.game_id, t.season_year, t.game_date, t.team_for, t.team_against,"

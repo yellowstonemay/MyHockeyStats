@@ -235,6 +235,13 @@ public class GameHistoryLookupService {
                 + ", CASE WHEN rg.game_id IS NULL THEN NULL"
                 + " WHEN LOWER(COALESCE(t.team_for, '')) = LOWER(COALESCE(rg.home_team, ''))"
                 + " THEN rg.away_goals ELSE rg.home_goals END AS score_against";
+        } else if (tableHasColumn(tableName, "result")) {
+            // NJHS keeps the score inside its result string ("W 7-1", "T 4-4")
+            // instead of score_for / score_against columns.
+            scoreColumns = ", CASE WHEN t.result ~ '^[WLT] [0-9]+-[0-9]+$'"
+                + " THEN split_part(split_part(t.result, ' ', 2), '-', 1)::int END AS score_for"
+                + ", CASE WHEN t.result ~ '^[WLT] [0-9]+-[0-9]+$'"
+                + " THEN split_part(split_part(t.result, ' ', 2), '-', 2)::int END AS score_against";
         } else {
             scoreColumns = ", NULL AS score_for, NULL AS score_against";
         }
@@ -359,6 +366,22 @@ public class GameHistoryLookupService {
             tableName
         );
         return exists != null && exists > 0;
+    }
+
+    private final Map<String, Boolean> columnExistsCache = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** The per-source game tables do not share a schema; check before selecting. */
+    private boolean tableHasColumn(String tableName, String columnName) {
+        return columnExistsCache.computeIfAbsent(tableName + "." + columnName, key -> {
+            Integer found = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.columns"
+                    + " WHERE table_schema = current_schema() AND table_name = ? AND column_name = ?",
+                Integer.class,
+                tableName,
+                columnName
+            );
+            return found != null && found > 0;
+        });
     }
 
     private boolean overrideTableAvailable() {
