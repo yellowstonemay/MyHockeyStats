@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { integrationsApi } from '../lib/integrationsApi'
 import { Button } from '../components/Button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/Card'
+import { FaqSection } from '../components/FaqSection'
 import { Input } from '../components/Input'
 import { ArrowLeft, Loader2, Lock, Pencil, RefreshCw, Search, Star, Trash2, UserPlus } from 'lucide-react'
 
@@ -743,6 +744,8 @@ export default function Players() {
             </div>
           </CardContent>
         </Card>
+
+        <FaqSection />
 
       </div>
     </div>

@@ -35,6 +35,15 @@ SEASON_URL = "https://atlantichockey.org/scores.php?seasonid={season}"
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
 
+# 2026-27 relaunch: the league serves games (with scores) as JSON, so the old
+# scores.php scoreboard - which also only ever showed the latest ~100 games -
+# is no longer needed.
+API_BASE = "https://atlantichockey.org/wp-json/ayhl/v1"
+API_HEADERS = {
+    "User-Agent": UA,
+    "Accept": "application/json, text/plain, */*",
+}
+
 # seasonid values we know about (mirrors scripts/ayhl/discover_teams.py)
 SEASON_TO_ID = {
     2010: 16, 2011: 17, 2012: 19, 2013: 20, 2014: 21, 2015: 22, 2016: 23,
@@ -58,6 +67,36 @@ def get_conn():
         user=os.environ.get("DB_USER", "admin"),
         password=os.environ.get("DB_PASSWORD", "your_secure_password"),
     )
+
+
+def fetch_season_games(season_id: int, timeout: int = 60) -> list[dict]:
+    """Every game of the season that has a final score, from the league API."""
+    import requests
+
+    resp = requests.get(f"{API_BASE}/schedule/", params={"season": season_id},
+                        headers=API_HEADERS, timeout=timeout)
+    resp.raise_for_status()
+    payload = resp.json()
+
+    games: list[dict] = []
+    for row in payload.get("games") or []:
+        away = row.get("away") or {}
+        home = row.get("home") or {}
+        if away.get("score") is None or home.get("score") is None:
+            continue
+        games.append({
+            "game_id": str(row.get("id")),
+            "league": (row.get("league") or {}).get("name"),
+            "away": away.get("name"),
+            "away_gf": int(away["score"]),
+            "home": home.get("name"),
+            "home_gf": int(home["score"]),
+            "game_date": row.get("date"),
+            "score": f"{away['score']}-{home['score']}",
+        })
+    print(f"  API reported {payload.get('count')} game(s) for season {season_id}, "
+          f"{len(games)} with a score")
+    return games
 
 
 def fetch_html(url: str, timeout: int = 45000) -> str:
@@ -198,12 +237,10 @@ def main() -> None:
             raise SystemExit(f"unknown season year {year} — pass --season <seasonid>")
 
     url = SEASON_URL.format(season=season_id)
-    print(f"Fetching AYHL scoreboard: {url}")
-    html = fetch_html(url)
-    games = parse_scoreboard(html)
-    print(f"  parsed {len(games)} scoreboard row(s)")
+    print(f"Fetching AYHL scores for season id {season_id} from the league API")
+    games = fetch_season_games(season_id)
     if not games:
-        raise SystemExit("no scoreboard rows parsed — page layout may have changed")
+        raise SystemExit("no scored games returned by the API")
 
     conn = get_conn()
     try:
