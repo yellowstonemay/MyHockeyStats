@@ -318,6 +318,14 @@ export default function Players() {
           can share the same player.
         </p>
 
+        {/* The FAQ card sits at the bottom of this page; this jump link makes it
+            discoverable without hunting for it. */}
+        <div className="-mt-4 mb-5 text-sm">
+          <a href="#faq" className="text-primary-600 hover:text-primary-700 underline">
+            Questions about adding, following or fixing stats? Jump to the FAQ
+          </a>
+        </div>
+
         {notice && (
           <div className="p-3 bg-green-100 border border-green-400 text-green-700 rounded-md mb-4 text-sm">
             {notice}
