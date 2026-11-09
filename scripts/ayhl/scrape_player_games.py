@@ -313,22 +313,33 @@ def save_checkpoint(season_year: int, data: dict[str, list[dict]]) -> None:
 
 
 def load_progress(season_year: int) -> set[str]:
-    """Return set of completed player IDs from progress file."""
+    """Completed player ids, but ONLY from a run started today.
+
+    The file exists to resume an interrupted run, not to remember that a player
+    was scraped once: per-game stats change every week. It used to be trusted
+    forever, so one failed player out of 1771 kept the run from ever resetting
+    and every later run reported "Players scraped: 1770, games collected: 0".
+    """
     path = checkpoint_progress_path(season_year)
     if not path.exists():
         return set()
     try:
         with open(path, encoding="utf-8") as fh:
             data = json.load(fh)
-            return set(data.get("completed", []))
     except Exception:
         return set()
+    if not isinstance(data, dict):
+        return set()
+    if data.get("run_date") != date.today().isoformat():
+        print("Progress file is from an earlier run - starting from scratch.")
+        return set()
+    return set(data.get("completed", []))
 
 
 def save_progress(season_year: int, completed: set[str]) -> None:
     path = checkpoint_progress_path(season_year)
     with open(path, "w", encoding="utf-8") as fh:
-        json.dump({"completed": sorted(completed)}, fh, indent=2)
+        json.dump({"run_date": date.today().isoformat(), "completed": sorted(completed)}, fh, indent=2)
 
 
 # ---------------------------------------------------------------------------
@@ -494,11 +505,9 @@ def main() -> None:
     else:
         checkpoint = {}
     completed: set[str] = set() if args.no_resume else load_progress(season_year)
-
-    # A progress file that already covers EVERY player means a previous run
-    # finished the whole list. Per-game stats change as the season progresses,
-    # so that set must NOT suppress the next refresh - start fresh. A partial
-    # set means a run was interrupted, so resume from it.
+    # load_progress() only returns players finished by a run that started TODAY,
+    # so a stale file cannot suppress this refresh. Keep the old guard as a
+    # second line of defence: a file covering every player means that run ended.
     all_player_ids = {p["player_id"] for p in all_players}
     if completed and all_player_ids and all_player_ids.issubset(completed):
         print("Progress covers all players (previous run finished) - refreshing from scratch.")
@@ -518,6 +527,8 @@ def main() -> None:
     # ---- Scrape loop --------------------------------------------------------
     total_upserted = 0
     total_games = 0
+    fetch_failures = 0
+    attempted = 0
 
     for idx, player in enumerate(all_players, start=1):
         pid = player["player_id"]
@@ -527,10 +538,12 @@ def main() -> None:
             print(f"  [{idx}/{len(all_players)}] Skip (already done): {pid} {pname}")
             continue
 
+        attempted += 1
         print(f"  [{idx}/{len(all_players)}] Scraping: {pid} {pname} ...", end=" ", flush=True)
         payload = fetch_player_payload(pid, season_id)
         if payload is None:
             print("FAILED (HTTP error)")
+            fetch_failures += 1
             continue
 
         games = parse_games_payload(payload, pid, pname, season_year, season_id)
@@ -570,6 +583,17 @@ def main() -> None:
 
     if conn:
         conn.close()
+
+    # A run where every request failed is a broken source, not a quiet day: exit
+    # non-zero so run_daily marks the step failed instead of logging success.
+    if attempted and fetch_failures == attempted:
+        print(f"[FAIL] every player request failed ({fetch_failures}/{attempted}) "
+              f"- the source is unreachable or has changed")
+        sys.exit(2)
+    if attempted and fetch_failures:
+        print(f"[WARN] {fetch_failures}/{attempted} player request(s) failed")
+    if attempted and total_games == 0:
+        print("[WARN] 0 games collected - check the source if the season is under way")
 
 
 if __name__ == "__main__":

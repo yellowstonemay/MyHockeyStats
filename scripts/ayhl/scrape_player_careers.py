@@ -20,6 +20,7 @@ import os
 import sys
 import time
 import re
+from datetime import datetime, timezone
 
 import requests
 from playwright.sync_api import sync_playwright
@@ -308,6 +309,16 @@ def main():
         except Exception:
             raw_progress = {}
 
+    # The progress file only exists to resume an INTERRUPTED run. A file written
+    # by an earlier day must never skip today's scrape: season stats change as
+    # games are played, and a single failed player used to stop the reset,
+    # freezing every career row at its first-ever value.
+    if isinstance(raw_progress, dict):
+        run_date = raw_progress.get('run_date')
+        if run_date and run_date != datetime.now(timezone.utc).date().isoformat():
+            print('Progress is from an earlier run - starting from scratch.')
+            raw_progress = {}
+
     ordered_input_ids = [entry['playerid'] for entry in playerids]
     name_by_pid = {entry['playerid']: entry.get('player_name', '') for entry in playerids}
     progress = normalize_progress(raw_progress, ordered_input_ids)
@@ -340,6 +351,7 @@ def main():
     # Save helper for simplified progress format
     def save_progress(current_player_id=None):
         payload = {
+            'run_date': datetime.now(timezone.utc).date().isoformat(),
             'current_player_id': current_player_id,
             'completed_player_ids': [pid for pid in ordered_input_ids if pid in completed_set],
             'empty_carrer_ids': [pid for pid in ordered_input_ids if pid in empty_carrer_set],

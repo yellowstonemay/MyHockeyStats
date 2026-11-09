@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.HashMap;
@@ -108,6 +109,7 @@ public class AdminController {
                    COUNT(DISTINCT psl.id) AS link_count,
                    STRING_AGG(DISTINCT psl.source, ',') AS sources,
                    last_dd.source                AS last_deep_dive_source,
+                   last_dd.source_player_id      AS last_deep_dive_player_id,
                    last_dd.last_deep_dive_at     AS last_deep_dive_at,
                    last_dd.last_deep_dive_status AS last_deep_dive_status,
                    last_dd.last_deep_dive_error  AS last_deep_dive_error,
@@ -124,7 +126,7 @@ public class AdminController {
             -- The outcome and the timestamp have to come from one row, so they
             -- are joined together instead of aggregated one by one.
             LEFT JOIN LATERAL (
-                SELECT l.source, l.last_deep_dive_at,
+                SELECT l.source, l.source_player_id, l.last_deep_dive_at,
                        l.last_deep_dive_status, l.last_deep_dive_error
                 FROM player_source_links l
                 JOIN user_players lup ON lup.player_id = l.player_id
@@ -145,7 +147,7 @@ public class AdminController {
                 LIMIT 1
             ) req ON TRUE
             GROUP BY u.id, u.email, u.full_name, u.is_admin, u.created_at, u.last_login_at,
-                     last_dd.source, last_dd.last_deep_dive_at,
+                     last_dd.source, last_dd.source_player_id, last_dd.last_deep_dive_at,
                      last_dd.last_deep_dive_status, last_dd.last_deep_dive_error,
                      req.status, req.requested_at, req.started_at
             ORDER BY u.created_at DESC
@@ -153,6 +155,42 @@ public class AdminController {
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql);
         rows.forEach(row -> decodeJsonColumn(row, "players"));
         return ResponseEntity.ok(Map.of("players", rows));
+    }
+
+    /**
+     * GET /api/admin/deep-dive-log?source=AYHL&sourcePlayerId=121730
+     *
+     * The transcript the deep-dive script stored for its last attempt at this
+     * source link. The status badge alone only says SUCCESS/FAILED, and a source
+     * that changed its site (AYHL 2026-27) reported SUCCESS while scraping a 404
+     * page — this is what the admin needs to read when that happens.
+     */
+    @GetMapping("/deep-dive-log")
+    public ResponseEntity<?> deepDiveLog(
+            @RequestHeader(value = "Authorization", required = false) String authHeader,
+            @RequestParam("source") String source,
+            @RequestParam("sourcePlayerId") String sourcePlayerId) {
+        if (resolveAdmin(authHeader).isEmpty()) {
+            return ResponseEntity.status(403).body(Map.of("error", "Admin access required"));
+        }
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+            """
+            SELECT source, source_player_id, link_state, last_deep_dive_at,
+                   last_deep_dive_status, last_deep_dive_error, last_deep_dive_log
+              FROM player_source_links
+             WHERE UPPER(source) = UPPER(?) AND source_player_id = ?
+            """,
+            source, sourcePlayerId);
+        if (rows.isEmpty()) {
+            return ResponseEntity.status(404).body(Map.of("error", "No such source link"));
+        }
+        Map<String, Object> row = rows.get(0);
+        Object log = row.get("last_deep_dive_log");
+        if (log == null || String.valueOf(log).isBlank()) {
+            row.put("last_deep_dive_log",
+                "No transcript recorded yet - the next deep-dive stores what it printed.");
+        }
+        return ResponseEntity.ok(row);
     }
 
     /**

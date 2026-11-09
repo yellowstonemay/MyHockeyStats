@@ -627,14 +627,18 @@ def scrape_player(conn, slug: str, season_year: int, all_seasons: bool = False,
 
 
 def run_and_record(conn, slug: str, season_year: int, all_seasons: bool,
-                   dry_run: bool) -> None:
+                   dry_run: bool, capture=None) -> None:
     """Scrape one player and record the outcome for the admin page."""
+    if capture is not None:
+        capture.mark()
     try:
         err = scrape_player(conn, slug, season_year, all_seasons=all_seasons, dry_run=dry_run)
     except Exception as e:  # one broken player must not abandon the rest of the run
         print(f"  {slug}: ERROR {e}")
         err = str(e)
-    deep_dive_status.record_outcome(conn, "NJHS", slug, ok=err is None, error=err)
+    deep_dive_status.record_outcome(
+        conn, "NJHS", slug, ok=err is None, error=err,
+        log_text=capture.since_mark() if capture is not None else None)
 
 
 def load_linked(conn) -> list[str]:
@@ -688,16 +692,19 @@ def main() -> None:
             return
         if args.player_slug:
             run_and_record(conn, args.player_slug, season_year,
-                           all_seasons=args.all_seasons, dry_run=args.dry_run)
+                           all_seasons=args.all_seasons, dry_run=args.dry_run,
+                           capture=deep_dive_status.install_capture())
             return
         slugs = load_linked(conn)
         if not slugs:
             print("No NJHS-linked users to deep-dive.")
             return
         print(f"Deep-diving {len(slugs)} NJHS player(s)...")
+        capture = deep_dive_status.install_capture()
         for slug in slugs:
             run_and_record(conn, slug, season_year,
-                           all_seasons=args.all_seasons, dry_run=args.dry_run)
+                           all_seasons=args.all_seasons, dry_run=args.dry_run,
+                           capture=capture)
     finally:
         if conn:
             conn.close()

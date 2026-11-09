@@ -86,6 +86,13 @@ export const integrationsApi = {
     return api.fetchWithAuth(`/admin/deep-dive/requests/${encodeURIComponent(userId)}`)
   },
 
+  // Admin: the transcript a deep-dive stored for one source link
+  // ("click the status to see the last scrape log").
+  fetchDeepDiveLog(source, sourcePlayerId) {
+    const query = new URLSearchParams({ source, sourcePlayerId: String(sourcePlayerId) })
+    return api.fetchWithAuth(`/admin/deep-dive-log?${query.toString()}`)
+  },
+
   // Notifications (e.g. "stats being retrieved" while a deep-dive runs)
   fetchNotifications() {
     return api.fetchWithAuth('/notifications')

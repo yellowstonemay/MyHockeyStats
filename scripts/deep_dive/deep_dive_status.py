@@ -12,11 +12,58 @@ and the scrapers already work with — so callers never need a profile id.
 """
 from __future__ import annotations
 
+import io
+import sys
+
 MAX_ERROR_LEN = 500
+# The transcript is what the admin page shows when a status is clicked, so keep
+# enough of it to see the source's own messages without bloating the row.
+MAX_LOG_LEN = 8000
+
+
+class _Capture(io.TextIOBase):
+    """stdout tee that can hand back everything printed since the last mark.
+
+    Deep-dive scripts print their progress (and the helpers they call print too),
+    so capturing at the stream level gives the admin page the real transcript
+    without threading a logger through every function.
+    """
+
+    def __init__(self, stream) -> None:
+        self._stream = stream
+        self._chunks: list[str] = []
+        self._mark = 0
+
+    def write(self, text: str) -> int:  # type: ignore[override]
+        self._stream.write(text)
+        self._chunks.append(text)
+        if len(self._chunks) > 20_000:
+            # Keep memory bounded on long --all-seasons runs; the mark is reset
+            # so a slice can only lose lines printed long before it.
+            self._chunks = self._chunks[10_000:]
+            self._mark = 0
+        return len(text)
+
+    def flush(self) -> None:  # type: ignore[override]
+        self._stream.flush()
+
+    def mark(self) -> None:
+        self._mark = len(self._chunks)
+
+    def since_mark(self, limit: int = MAX_LOG_LEN) -> str:
+        text = "".join(self._chunks[self._mark:])
+        return text if len(text) <= limit else "…" + text[-limit:]
+
+
+def install_capture():
+    """Tee sys.stdout and return the sink (call once, at the start of main)."""
+    sink = _Capture(sys.stdout)
+    sys.stdout = sink
+    return sink
 
 
 def record_outcome(conn, source: str, source_player_id: str, ok: bool,
-                   error: object = None) -> None:
+                   error: object = None, log_text: str | None = None) -> None:
     """Stamp this player's link row with the outcome of one deep-dive attempt.
 
     Best-effort: bookkeeping must never take a scrape down with it, so failures
@@ -43,10 +90,12 @@ def record_outcome(conn, source: str, source_player_id: str, ok: bool,
                 """UPDATE player_source_links
                       SET last_deep_dive_at     = NOW(),
                           last_deep_dive_status = %s,
-                          last_deep_dive_error  = %s
+                          last_deep_dive_error  = %s,
+                          last_deep_dive_log    = COALESCE(%s, last_deep_dive_log)
                     WHERE source = %s AND source_player_id = %s
                       AND link_state = 'CONFIRMED'""",
-                ("SUCCESS" if ok else "FAILED", detail, source, str(source_player_id)),
+                ("SUCCESS" if ok else "FAILED", detail,
+                 (log_text[:MAX_LOG_LEN] if log_text else None), source, str(source_player_id)),
             )
         conn.commit()
     except Exception as e:  # noqa: BLE001

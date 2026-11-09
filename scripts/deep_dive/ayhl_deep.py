@@ -9,8 +9,10 @@ history into `ayhl_player_games` (current season by default; every season with
 --all-seasons). Game rows are UPSERTed on (player_id, season_year, game_id) —
 existing rows are never deleted.
 
-The AYHL player page (playerpage.php?playerid=...) is server-rendered HTML, so
-plain HTTP + BeautifulSoup is sufficient (no browser needed).
+The AYHL site became a WordPress app in 2026-27, so the player's career and
+per-game history come from its REST API (wp-json/ayhl/v1/players/<id>/) — one
+JSON call per player, no browser. The old playerpage.php answers 404 for
+everyone, and the deep dive used to report SUCCESS after parsing that 404 page.
 
 Usage:
     python ayhl_deep.py                       # all AYHL-linked users
@@ -25,13 +27,11 @@ import os
 import re
 import sys
 from datetime import datetime, timezone, date
-from html import unescape
 from uuid import uuid4
 
 import psycopg2
 import psycopg2.extras
 import requests
-from bs4 import BeautifulSoup
 
 import deep_dive_status
 
@@ -39,7 +39,18 @@ BASE_URL = "https://atlantichockey.org/playerpage.php?playerid={pid}"
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
                   "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
 }
+
+# 2026-27 relaunch: atlantichockey.org became a WordPress app whose data comes
+# from /wp-json/ayhl/v1/. playerpage.php now answers 404 for EVERY player, which
+# used to look like a successful deep-dive: the parser read the 404 page's title
+# ("This page has left the ice") as the player name and found 0 seasons, 0 games.
+API_BASE = "https://atlantichockey.org/wp-json/ayhl/v1"
+
+# atlantichockey.org labels a season by the year it starts in, but the schedule
+# runs Aug..Mar, so a season's games are windowed Apr..Mar (same rule as the
+# other scrapers and games_from_payload below).
 
 STAT_FIELDS = [
     ("games_played", "Games"),
@@ -90,96 +101,66 @@ def load_ayhl_linked_players(conn) -> list[tuple[str, str]]:
     return list(seen.items())
 
 
-def fetch_player_html(pid: str, season_id: int | None = None) -> str:
-    """Fetch a player page's raw HTML, preferring playwright+stealth (required on
-    the Mac mini where plain requests gets a Cloudflare 403), falling back to
-    requests. Passing season_id returns that season's game table."""
-    url = BASE_URL.format(pid=pid)
-    if season_id is not None:
-        url += f"&seasonid={season_id}"
-    try:
-        from playwright.sync_api import sync_playwright
-        from playwright_stealth import Stealth
-        _stealth = Stealth()
-        with sync_playwright() as p:
-            browser = p.chromium.launch(
-                headless=True,
-                args=["--disable-blink-features=AutomationControlled", "--no-sandbox"],
-            )
-            try:
-                page = browser.new_page()
-                page.set_default_navigation_timeout(45000)
-                _stealth.apply_stealth_sync(page)
-                page.goto(url, wait_until="load", timeout=45000)
-                # Wait out a Cloudflare JS challenge ("Just a moment...") — real
-                # browsers auto-resolve it after a few seconds.
-                for _ in range(10):
-                    title = (page.title() or "").lower()
-                    if "just a moment" not in title:
-                        break
-                    page.wait_for_timeout(2500)
-                page.wait_for_timeout(1500)
-                html = page.content()
-            finally:
-                browser.close()
-        return html
-    except Exception as e:
-        print(f"    (playwright failed: {e}; trying requests)")
-        resp = requests.get(url, headers=HEADERS, timeout=30)
-        resp.raise_for_status()
-        return resp.text
+def fetch_player_payload(pid: str, season_id: int | None = None, timeout: int = 30) -> dict:
+    """Fetch a player's JSON payload: profile, career rows and every game.
+
+    Raises on HTTP/parse errors so the caller can record a real failure instead
+    of treating an empty result as success.
+    """
+    params = {"season": str(season_id)} if season_id is not None else None
+    resp = requests.get(f"{API_BASE}/players/{pid}/", params=params,
+                        headers=HEADERS, timeout=timeout)
+    resp.raise_for_status()
+    payload = resp.json()
+    if not isinstance(payload, dict) or ("career" not in payload and "games" not in payload):
+        raise ValueError(f"unexpected payload for player {pid}")
+    return payload
 
 
-def fetch_player_page(pid: str, season_id: int | None = None) -> BeautifulSoup:
-    return BeautifulSoup(fetch_player_html(pid, season_id), "html.parser")
+def parse_player(payload: dict, pid: str) -> dict:
+    """Normalise the API payload into the shape the upserts expect.
 
+    rows        career rows, one dict per season (league/team/GP/G/A/P/PIM)
+    game_rows   the same games as flat dicts (season bucketed later)
+    """
+    player = payload.get("player") or {}
+    name = (player.get("name") or "").strip()
+    jersey = str(player.get("jersey") or "").strip()
 
-def parse_player(soup: BeautifulSoup, pid: str) -> dict:
-    """Extract name, jersey, career rows, and current-season game rows."""
-    name = ""
-    jersey = ""
-    # The page has a title h1 ("AYHL Player Bio") plus a player heading like
-    # "#6  Ethan Yan" (jersey optional). Skip the page title.
-    for h in soup.find_all("h1"):
-        txt = h.get_text(" ", strip=True)
-        low = txt.lower()
-        if low.startswith("ayhl") or "player bio" in low:
+    rows: list[dict] = []
+    for entry in payload.get("career") or []:
+        label = ((entry.get("season") or {}).get("label") or "").strip()
+        if not label:
             continue
-        jm = re.match(r"#\s*(\d+)", txt)
-        if jm:
-            jersey = jm.group(1)
-        name = re.sub(r"#\s*\d+", "", txt).strip()
-        break
+        rows.append({
+            "season_label": label,
+            "league": (entry.get("league") or "").strip() or "AYHL",
+            "team": ((entry.get("team") or {}).get("name") or "").strip(),
+            "games_played": to_int(entry.get("gp")),
+            "goals": to_int(entry.get("goals")),
+            "assists": to_int(entry.get("assists")),
+            "points": to_int(entry.get("points")),
+            "penalties": to_int(entry.get("penalties")),
+            "pim": to_int(entry.get("pim")),
+        })
 
-    # Career rows: only from the main career table (w3-table), exactly 9 cells,
-    # and a clean "YYYY-YYYY Season" in the first cell. This avoids the nested
-    # outer table rows and duplicates.
-    rows: list[list[str]] = []
-    seen = set()
-    for table in soup.find_all("table", class_="w3-table"):
-        for tr in table.find_all("tr"):
-            cells = [td.get_text(" ", strip=True) for td in tr.find_all("td")]
-            if len(cells) == 9 and re.fullmatch(r"\d{4}-\d{4} Season", cells[0] or ""):
-                if cells[0] not in seen:
-                    seen.add(cells[0])
-                    rows.append(cells)
-
-    # Current-season game-by-game rows (second w3-table). The header row has
-    # <th> so it yields 0 <td>; a "played no games" message yields 0 data rows.
-    game_rows: list[list[str]] = []
-    for table in soup.find_all("table", class_="w3-table"):
-        for tr in table.find_all("tr"):
-            cells = [td.get_text(" ", strip=True) for td in tr.find_all("td")]
-            if cells and not re.fullmatch(r"\d{4}-\d{4} Season", cells[0] or ""):
-                game_rows.append(cells)
-
-    return {"pid": pid, "name": name, "jersey": jersey,
-            "rows": rows, "game_rows": game_rows}
+    return {"pid": pid, "name": name, "jersey": jersey, "rows": rows,
+            "game_rows": payload.get("games") or []}
 
 
 def to_int(v) -> int | None:
+    """Parse a stat value; 0 is a real number, not "missing".
+
+    The old version used `str(v or "")`, which turned every 0 into "" and then
+    into None — so every zero-goal/zero-PIM game was stored as NULL.
+    """
+    if v is None:
+        return None
+    text = str(v).strip()
+    if text == "":
+        return None
     try:
-        return int(str(v or "").strip())
+        return int(text)
     except (TypeError, ValueError):
         return None
 
@@ -195,20 +176,22 @@ def upsert_career(conn, entry: dict, all_seasons: bool = False) -> list[dict]:
     rows = entry["rows"]
     if not all_seasons:
         cur_label = season_label_for(current_season_year())
-        rows = [r for r in rows if r[0] == cur_label]
+        rows = [r for r in rows if r["season_label"] == cur_label]
 
     with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-        for cells in rows:
-            season_label = cells[0]
-            league_name = "AYHL"
-            team_name = cells[2] if len(cells) > 2 else None
+        for row in rows:
+            season_label = row["season_label"]
+            # The API publishes the division ("15 Pure 11"); older rows stored
+            # just the league, so keep AYHL as the fallback.
+            league_name = row.get("league") or "AYHL"
+            team_name = row.get("team") or None
             vals = {
-                "games_played": to_int(cells[3]) if len(cells) > 3 else None,
-                "goals": to_int(cells[4]) if len(cells) > 4 else None,
-                "assists": to_int(cells[5]) if len(cells) > 5 else None,
-                "points": to_int(cells[6]) if len(cells) > 6 else None,
-                "penalties": to_int(cells[7]) if len(cells) > 7 else None,
-                "pim": to_int(cells[8]) if len(cells) > 8 else None,
+                "games_played": row.get("games_played"),
+                "goals": row.get("goals"),
+                "assists": row.get("assists"),
+                "points": row.get("points"),
+                "penalties": row.get("penalties"),
+                "pim": row.get("pim"),
             }
 
             # Fetch existing row for change detection
@@ -273,111 +256,51 @@ def upsert_career(conn, entry: dict, all_seasons: bool = False) -> list[dict]:
 # Game-by-game history (upsert into ayhl_player_games — never deletes rows)
 # ---------------------------------------------------------------------------
 
-def _safe_int(val: str) -> int | None:
-    v = (val or "").strip()
-    if not v or v == "-":
-        return None
-    try:
-        return int(v)
-    except ValueError:
-        return None
+def games_from_payload(payload: dict, player_id: str, player_name: str) -> dict[int, list[dict]]:
+    """Per-game rows from the API payload, bucketed by season year.
 
-
-def _parse_date(val: str) -> str | None:
-    """Convert MM/DD/YY to ISO date string YYYY-MM-DD, or None on failure."""
-    v = (val or "").strip()
-    if not v:
-        return None
-    try:
-        parts = v.split("/")
-        if len(parts) == 3:
-            month, day, year_2 = int(parts[0]), int(parts[1]), int(parts[2])
-            full_year = 2000 + year_2
-            return f"{full_year:04d}-{month:02d}-{day:02d}"
-    except (ValueError, IndexError):
-        pass
-    return None
-
-
-def _strip_tags(value: str) -> str:
-    text = re.sub(r"<[^>]+>", "", value)
-    return unescape(text).replace("\xa0", " ").strip()
-
-
-def parse_games_table(html: str, player_id: str, player_name: str,
-                      season_year: int, season_id: int | str) -> list[dict]:
-    """Parse the 'Statistics By Game' table from a player page.
-
-    Expected columns (in order):
-        Game ID | Date | Game Type | League | Team For | Team Against |
-        G | G(PP) | G(SH) | G(SO) | A | P | PIM
+    The API returns every game of the player's career in one call, each with an
+    ISO date, so the season is derived from the date (Apr..Mar window) instead of
+    trusting a season id - the old per-seasonid fetch filed 11 seasons of the
+    same game because the site always rendered the current season.
     """
-    heading_match = re.search(
-        r"Statistics By Game</h[234]>\s*<table class=\"w3-table\">\s*<tr><td>\s*<table[^>]*>(.*?)</table>",
-        html,
-        re.IGNORECASE | re.DOTALL,
-    )
-    if not heading_match:
-        return []
-
-    table_html = heading_match.group(1)
-    row_matches = re.findall(r"<tr\b[^>]*>(.*?)</tr>", table_html, re.IGNORECASE | re.DOTALL)
-    if not row_matches:
-        return []
-
-    header_cells_raw = re.findall(r"<th\b[^>]*>(.*?)</(?:th|td)>", row_matches[0], re.IGNORECASE | re.DOTALL)
-    header_cells = [_strip_tags(cell) for cell in header_cells_raw]
-    normalised = [c.lower().replace(" ", "").replace("(", "").replace(")", "") for c in header_cells]
-    col_map = {name: idx for idx, name in enumerate(normalised)}
-
-    if "gameid" not in col_map:
-        return []
-
-    required = {"gameid", "date", "teamfor", "teamagainst", "g", "a", "p", "pim"}
-    if not required.issubset(col_map):
-        print(f"    [WARN] Unexpected game table columns for player {player_id}: {list(col_map.keys())}")
-        return []
-
-    games: list[dict] = []
     scraped_at = datetime.now(timezone.utc)
-    label = season_label_for(season_year)
+    buckets: dict[int, list[dict]] = {}
 
-    for row_html in row_matches[1:]:
-        cells = [_strip_tags(cell) for cell in re.findall(r"<td\b[^>]*>(.*?)</td>", row_html, re.IGNORECASE | re.DOTALL)]
-        if len(cells) < len(col_map):
+    for row in payload.get("games") or []:
+        if not isinstance(row, dict):
             continue
-
-        def col(name: str) -> str:
-            idx = col_map.get(name)
-            return cells[idx].strip() if idx is not None and idx < len(cells) else ""
-
-        game_id = col("gameid")
+        raw_date = str(row.get("date") or "").strip()
+        try:
+            game_date = date.fromisoformat(raw_date)
+        except ValueError:
+            continue
+        season_year = game_date.year if game_date.month >= 4 else game_date.year - 1
+        game_id = str(row.get("id") or "").strip()
         if not game_id:
             continue
-
-        games.append({
+        buckets.setdefault(season_year, []).append({
             "player_id": player_id,
-            "player_name": player_name,
+            "player_name": player_name or "N/A",
             "season_year": season_year,
-            "season_label": label,
-            "season_id": str(season_id),
+            "season_label": season_label_for(season_year),
+            "season_id": str((payload.get("season") or {}).get("id") or ""),
             "game_id": game_id,
-            "game_date": _parse_date(col("date")),
-            "game_type": col("gametype") or None,
-            "league": col("league") or None,
-            "team_for": col("teamfor") or None,
-            "team_against": col("teamagainst") or None,
-            "goals": _safe_int(col("g")),
-            "goals_pp": _safe_int(col("gpp")),
-            "goals_sh": _safe_int(col("gsh")),
-            "goals_so": _safe_int(col("gso")),
-            "assists": _safe_int(col("a")),
-            "points": _safe_int(col("p")),
-            "pim": _safe_int(col("pim")),
+            "game_date": game_date.isoformat(),
+            "game_type": row.get("type") or None,
+            "league": row.get("league") or None,
+            "team_for": (row.get("team") or {}).get("name") or None,
+            "team_against": (row.get("opponent") or {}).get("name") or None,
+            "goals": to_int(row.get("goals")),
+            "goals_pp": to_int(row.get("goals_pp")),
+            "goals_sh": to_int(row.get("goals_sh")),
+            "goals_so": to_int(row.get("goals_so")),
+            "assists": to_int(row.get("assists")),
+            "points": to_int(row.get("points")),
+            "pim": to_int(row.get("pim")),
             "scraped_at": scraped_at,
         })
-
-    return games
+    return buckets
 
 
 UPSERT_GAMES_SQL = """
@@ -432,7 +355,11 @@ def upsert_player_games(conn, games: list[dict]) -> int:
 
 
 def _roster_season_ids(conn) -> list[tuple[int, int]]:
-    """(season_year, season_id) pairs from ayhl_roster, newest first."""
+    """(season_year, season_id) pairs from ayhl_roster, newest first.
+
+    Only used for the season picker: the API hands over every season's games at
+    once, so it no longer drives the scraping.
+    """
     with conn.cursor() as cur:
         cur.execute("SELECT DISTINCT season_id, season_label FROM ayhl_roster")
         out: list[tuple[int, int]] = []
@@ -446,87 +373,48 @@ def _roster_season_ids(conn) -> list[tuple[int, int]]:
     return sorted(out, key=lambda x: -x[0])
 
 
-def _in_season_window(game_date, season_year: int) -> bool:
-    """True when a game date really belongs to the season starting in `season_year`.
+def game_history(conn, pid: str, name: str, payload: dict, all_seasons: bool = False,
+                 dry_run: bool = False) -> tuple[int, int]:
+    """Upsert the player's game-by-game history from the API payload.
 
-    APRIL cutover — the same rule as current_season_year() and the other scrapers
-    (njhs_deep / thf_ahf_deep): a game belongs to season Y when it is played
-    Apr Y .. Mar Y+1.
-    """
-    if game_date is None:
-        return False
-    if isinstance(game_date, str):
-        try:
-            game_date = datetime.strptime(game_date[:10], "%Y-%m-%d").date()
-        except ValueError:
-            return False
-    if game_date.month >= 4:
-        return game_date.year == season_year
-    return game_date.year == season_year + 1
-
-
-def game_history(conn, pid: str, name: str, all_seasons: bool = False,
-                 dry_run: bool = False) -> int:
-    """Fetch + upsert game-by-game history for one AYHL player.
-
-    The AYHL player page only renders its "Statistics By Game" table when given
-    a seasonid, so we look the season ids up from ayhl_roster and fetch with
-    them. Default: the CURRENT season plus the most recent season we already
-    hold games for. --all-seasons: every season in ayhl_roster. Rows are
-    UPSERTed on (player_id, season_year, game_id) — existing rows are refreshed,
-    never deleted.
-
-    The current season must be requested explicitly. Resolving the default from
-    MAX(season_year) alone deadlocks: the max can never advance to a new season,
-    because no rows for that season exist yet to raise it, so a new season is
-    never discovered (AYHL 2026-27 was invisible for exactly this reason).
+    Returns (rows_written, seasons_seen). The API hands over every season at
+    once; by default only the current season and the newest season we already
+    hold are refreshed (late-added games), --all-seasons takes everything.
+    Rows are UPSERTed on (player_id, season_year, game_id) — existing rows are
+    refreshed, never deleted.
     """
     with conn.cursor() as cur:
         cur.execute("SELECT COALESCE(MAX(season_year), 0) FROM ayhl_player_games")
         max_game_year = cur.fetchone()[0] or 0
-    seasons = _roster_season_ids(conn)
 
-    if all_seasons:
-        targets = seasons
-    else:
-        want_years = {current_season_year()}
+    buckets = games_from_payload(payload, pid, name)
+    if not all_seasons:
+        want = {current_season_year()}
         if max_game_year:
-            # Keep refreshing the most recent season we hold (late-added games).
-            want_years.add(max_game_year)
-        targets = [(sy, sid) for sy, sid in seasons if sy in want_years]
-        if not targets and seasons:
-            targets = seasons[:1]
+            want.add(max_game_year)
+        buckets = {year: rows for year, rows in buckets.items() if year in want}
 
     total = 0
-    for season_year, sid in targets:
-        try:
-            html = fetch_player_html(pid, season_id=sid)
-        except Exception as e:
-            print(f"    games[{season_year}-{season_year + 1}]: ERROR {e}")
-            continue
-        games = parse_games_table(html, pid, name or "N/A", season_year, sid)
-        if not games:
-            print(f"    games[{season_year}-{season_year + 1}]: no game rows")
-            continue
-        # atlantichockey.org renders the CURRENT season's "Statistics By Game"
-        # table whenever the requested season has no games, so trusting the
-        # request files the same game under every stale season (this happened
-        # for 11 seasons at once). Keep only games inside this season's window.
-        kept = [g for g in games if _in_season_window(g.get("game_date"), season_year)]
-        if len(kept) != len(games):
-            print(f"    games[{season_year}-{season_year + 1}]: "
-                  f"dropped {len(games) - len(kept)} row(s) dated outside this season")
-        games = kept
+    for season_year in sorted(buckets):
+        games = buckets[season_year]
+        label = season_label_for(season_year)
         if not games:
             continue
         if dry_run:
-            print(f"    games[{season_year}-{season_year + 1}]: {len(games)} row(s) (dry-run)")
+            print(f"    games[{label}]: {len(games)} row(s) (dry-run)")
             total += len(games)
-        else:
-            upsert_player_games(conn, games)
-            print(f"    games[{season_year}-{season_year + 1}]: upserted {len(games)} row(s)")
-            total += len(games)
-    return total
+            continue
+        upsert_player_games(conn, games)
+        print(f"    games[{label}]: upserted {len(games)} row(s)")
+        total += len(games)
+    return total, len(buckets)
+
+
+def count_stored_games(conn, pid: str) -> int:
+    """How many AYHL game rows we hold for a player (all seasons)."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM ayhl_player_games WHERE player_id = %s", (pid,))
+        return int(cur.fetchone()[0] or 0)
 
 
 def derive_career_from_games(conn, pid: str, name: str, dry_run: bool = False) -> int:
@@ -673,19 +561,26 @@ def main() -> None:
             print("No AYHL-linked users to deep-dive.")
             return
         print(f"Deep-diving {len(players)} AYHL player(s)...")
+        capture = deep_dive_status.install_capture()
+        games_written = 0
+        failed: list[tuple[str, str]] = []
         for pid, _label in players:
             entry = None
-            ok = True
+            payload = None
+            fail_reason = None
+            capture.mark()
             try:
-                soup = fetch_player_page(pid)
-                entry = parse_player(soup, pid)
+                payload = fetch_player_payload(pid)
+                entry = parse_player(payload, pid)
                 print(f"  {pid}: {entry['name'] or '(no name)'} jersey={entry['jersey'] or '?'} "
                       f"seasons={len(entry['rows'])} gameRows={len(entry['game_rows'])}")
+                if not entry["name"]:
+                    raise ValueError("source returned no player name (unexpected payload)")
                 if not entry["rows"]:
-                    print("    (no career table on source page)")
+                    print("    (source lists no career rows for this player)")
                 if args.dry_run:
-                    for cells in entry["rows"]:
-                        print("    ", cells)
+                    for row in entry["rows"]:
+                        print("    ", row)
                 else:
                     changes = upsert_career(conn, entry, all_seasons=args.all_seasons)
                     skeletons = create_skeletons(conn, pid, entry["name"], all_seasons=args.all_seasons)
@@ -696,13 +591,23 @@ def main() -> None:
                     if skeletons:
                         print(f"    -> created {skeletons} skeleton season(s) (empty stats, user-editable)")
                     # Game-by-game history (upsert into ayhl_player_games)
-                    game_history(conn, pid, entry["name"],
-                                 all_seasons=args.all_seasons, dry_run=False)
+                    written, seasons = game_history(conn, pid, entry["name"], payload,
+                                                    all_seasons=args.all_seasons, dry_run=False)
+                    games_written += written
+                    # Honest accounting: the source says this player HAS games,
+                    # so a run that stores none must not be reported as success.
+                    stored = count_stored_games(conn, pid)
+                    if stored == 0 and entry["game_rows"]:
+                        fail_reason = (f"source lists {len(entry['game_rows'])} game(s) but "
+                                       f"ayhl_player_games has none for this player")
+                    elif entry["game_rows"] and stored < len(entry["game_rows"]):
+                        print(f"    (note: source lists {len(entry['game_rows'])} game(s), "
+                              f"we hold {stored} — older seasons are only refreshed with --all-seasons)")
             except Exception as e:
                 print(f"  {pid}: ERROR {e}")
-                ok = False
-            # Runs even when the page was blocked by Cloudflare: fill any career
-            # row that still has NO stats from the game rows we hold.
+                fail_reason = f"{type(e).__name__}: {e}"
+            # Runs even when the fetch failed: fill any career row that still has
+            # NO stats from the game rows we already hold.
             try:
                 derived = derive_career_from_games(conn, pid, (entry or {}).get("name", ""),
                                                    dry_run=args.dry_run)
@@ -711,7 +616,19 @@ def main() -> None:
             except Exception as e:
                 print(f"    (derive from games failed: {e})")
             if not args.dry_run:
-                deep_dive_status.record_outcome(conn, "AYHL", pid, ok=ok, error=None if ok else "see log")
+                deep_dive_status.record_outcome(conn, "AYHL", pid, ok=fail_reason is None,
+                                                error=fail_reason,
+                                                log_text=capture.since_mark())
+                if fail_reason:
+                    failed.append((pid, fail_reason))
+
+        # A summary the cron log (and the admin page) can be judged by: the old
+        # code printed nothing here, so "0 games for everyone" looked like a
+        # normal run.
+        print(f"\nAYHL deep-dive done: {len(players)} player(s), "
+              f"{games_written} game row(s) written, {len(failed)} failure(s)")
+        for pid, reason in failed:
+            print(f"  FAILED {pid}: {reason}")
     finally:
         conn.close()
 

@@ -429,6 +429,7 @@ def main() -> None:
 
     conn = get_conn()
     try:
+        capture = deep_dive_status.install_capture()
         sources = ["THF", "AHF"] if not args.source else [args.source]
         cur_year = current_season_year()
         scope_year = None if args.all_seasons else cur_year
@@ -437,6 +438,8 @@ def main() -> None:
             links = load_linked(conn, source, player_id=args.player_id)
             print(f"[{source}] {len(links)} linked user(s)")
             for player_id, pname in links:
+                capture.mark()
+                fail_reason = None
                 try:
                     season_year = scope_year
                     rows = latest_roster_stats(conn, source, player_id, season_year=season_year)
@@ -459,11 +462,14 @@ def main() -> None:
                 except Exception as e:
                     # One broken player must not abandon the rest of the run.
                     print(f"  {player_id}: ERROR {e}")
+                    fail_reason = f"{type(e).__name__}: {e}"
                     if not args.dry_run:
-                        deep_dive_status.record_outcome(conn, source, player_id, ok=False, error=e)
+                        deep_dive_status.record_outcome(conn, source, player_id, ok=False, error=e,
+                                                        log_text=capture.since_mark())
                     continue
                 if not args.dry_run:
-                    deep_dive_status.record_outcome(conn, source, player_id, ok=True)
+                    deep_dive_status.record_outcome(conn, source, player_id, ok=True,
+                                                    log_text=capture.since_mark())
     finally:
         conn.close()
 

@@ -4,6 +4,7 @@ import { integrationsApi } from '../lib/integrationsApi'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/Card'
 import { Button } from '../components/Button'
 import DeepDiveStatusDialog from '../components/DeepDiveStatusDialog'
+import DeepDiveLogDialog from '../components/DeepDiveLogDialog'
 import { AlertCircle, Clock, Loader2, RefreshCw, Radar, Inbox } from 'lucide-react'
 
 function fmt(ts) {
@@ -62,6 +63,7 @@ export default function AdminPlayersPage() {
   const [triggeringId, setTriggeringId] = useState(null)
   const [actionMsg, setActionMsg] = useState(null)
   const [ddDialog, setDdDialog] = useState(null)
+  const [ddLog, setDdLog] = useState(null)
 
   const [messages, setMessages] = useState([])
   const [messagesLoading, setMessagesLoading] = useState(false)
@@ -211,6 +213,26 @@ export default function AdminPlayersPage() {
 
   const openDeepDiveStatus = (p) => {
     setDdDialog({ userId: p.id, label: p.user_name || p.email, message: null })
+  }
+
+  // Clicking the Last deep-dive badge opens the transcript that run stored, so
+  // "Success" can be checked against what the source actually returned.
+  const openDeepDiveLog = (p, dd) => {
+    if (!p.last_deep_dive_at) return
+    if (!p.last_deep_dive_player_id) {
+      setDdLog({
+        source: p.last_deep_dive_source || '?',
+        sourcePlayerId: '-',
+        label: `${dd.label} ${dd.when || ''}`.trim(),
+        missingId: true,
+      })
+      return
+    }
+    setDdLog({
+      source: p.last_deep_dive_source || '?',
+      sourcePlayerId: p.last_deep_dive_player_id,
+      label: `${dd.label} ${dd.when || ''}`.trim(),
+    })
   }
 
   const staleThresholdDays = 2
@@ -367,7 +389,21 @@ export default function AdminPlayersPage() {
                           </td>
                           <td className="px-3 py-2 whitespace-nowrap">{fmt(p.last_login_at)}</td>
                           <td className="px-3 py-2 whitespace-nowrap">
-                            <span className={`text-xs px-2 py-1 rounded-full ${dd.cls}`} title={dd.title}>{dd.label}</span>
+                            <button
+                              type="button"
+                              onClick={() => openDeepDiveLog(p, dd)}
+                              disabled={!p.last_deep_dive_at}
+                              title={
+                                p.last_deep_dive_at
+                                  ? `${dd.title} — click to see the last deep-dive log`
+                                  : dd.title
+                              }
+                              className={`text-xs px-2 py-1 rounded-full ${dd.cls} ${
+                                p.last_deep_dive_at ? 'hover:ring-2 hover:ring-slate-300 cursor-pointer' : 'cursor-default'
+                              }`}
+                            >
+                              {dd.label}
+                            </button>
                             {dd.when ? <span className="ml-2 text-xs text-slate-500">{dd.when}</span> : null}
                           </td>
                           <td className="px-3 py-2">
@@ -587,6 +623,10 @@ export default function AdminPlayersPage() {
           }}
           onFinished={load}
         />
+      )}
+
+      {isAdmin && ddLog && (
+        <DeepDiveLogDialog target={ddLog} onClose={() => setDdLog(null)} />
       )}
     </div>
   )
